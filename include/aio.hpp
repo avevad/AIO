@@ -156,18 +156,18 @@ namespace AIO {
             }
 
         private:
-            void start() try {
-                auto &arg = std::get<0>(arg_ref.value());
-                arg_ref.reset();
-                yield_impl(start_fn.value()(arg), true);
-            } catch (coroutine_finish) {
-                swapcontext(&context, &ret_context);
-            } catch (...) {
+            void start() {
                 try {
-                    yield_err();
+                    auto &arg = std::get<0>(arg_ref.value());
+                    arg_ref.reset();
+                    yield_impl(start_fn.value()(arg), true);
                 } catch (coroutine_finish) {
-                    swapcontext(&context, &ret_context);
+                } catch (...) {
+                    try {
+                        yield_err();
+                    } catch (coroutine_finish) { }
                 }
+                swapcontext(&context, &ret_context);
             }
 
             static void entrypoint() {
