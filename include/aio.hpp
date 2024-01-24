@@ -7,7 +7,9 @@
 #include <optional>
 
 #define _XOPEN_SOURCE 600
+
 #include "ucontext.h"
+
 #undef _XOPEN_SOURCE
 
 namespace AIO {
@@ -187,7 +189,7 @@ namespace AIO {
 
             Bond(const Bond &) = delete;
 
-            Bond(Bond &&other) noexcept : link(other.link) {
+            Bond(Bond &&other) noexcept: link(other.link) {
                 other.link = std::nullopt;
                 if (link.has_value() && link.value()) {
                     link.value()->link = this;
@@ -314,4 +316,81 @@ namespace AIO {
         using _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>::kill;
 
     };
+
+    class EventLoop;
+
+    template<typename Ret>
+    class Future final : _impl::Bond {
+        EventLoop *loop;
+        std::optional<Ret> ret;
+        std::optional<std::function<void()>> on_finish;
+        bool awaited = false;
+
+        friend EventLoop;
+
+        explicit Future(EventLoop *loop) : loop(loop) {}
+
+    public:
+        Ret await();
+
+        ~Future() override {
+            if (!awaited) _impl::assertion_failed("future was never awaited");
+        }
+    };
+
+
+    template<typename Ret>
+    class Promise final : _impl::Bond {
+        friend EventLoop;
+
+        Promise() = default;
+
+    public:
+        Future<Ret> &future() const {
+            return *static_cast<Future<Ret> *>(get_link());
+        }
+    };
+
+    class EventLoop {
+        template<typename Ret>
+        friend
+        class Future;
+
+    protected:
+        virtual void set_current_coroutine(Coroutine<void()> *cor) = 0;
+
+        virtual Coroutine<void()> *get_current_coroutine() = 0;
+
+        Coroutine<void()> *swap_coroutine(Coroutine<void()> *cor) {
+            Coroutine<void()> *cur = get_current_coroutine();
+            set_current_coroutine(cor);
+            return cur;
+        }
+
+    public:
+        virtual void add_task(const std::function<void()> &fn) = 0;
+
+        template<typename Ret, typename... Args>
+        Future<Ret> async_call(const std::function<Ret(Args...)> &fn) {
+
+
+        }
+
+        template<typename Ret, typename... Args>
+        std::function<Future<Ret>(Args...)> async(const std::function<Ret(Args...)> &fn) {
+            return [this, &fn](Args &&... args) -> Ret { return async_call(fn); };
+        }
+    };
+
+    template<typename Ret>
+    Ret Future<Ret>::await() {
+        if (on_finish.has_value()) _impl::assertion_failed("future was already awaited");
+        auto *cor = loop->get_current_coroutine();
+        loop->add_task([this, cor]() -> void {
+            loop->swap_coroutine(cor);
+            cor->resume();
+        });
+        cor->yield();
+        return std::move(ret.value());
+    }
 }
