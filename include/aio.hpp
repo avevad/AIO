@@ -165,7 +165,7 @@ namespace AIO {
                 } catch (...) {
                     try {
                         yield_err();
-                    } catch (coroutine_finish) { }
+                    } catch (coroutine_finish) {}
                 }
                 swapcontext(&context, &ret_context);
             }
@@ -262,5 +262,51 @@ namespace AIO {
         using _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>::is_dead;
         using _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>::kill;
 
+    };
+
+    template<typename Bound1, typename Bound2>
+    static void bind_objects(Bound1 &obj1, Bound2 &obj2) {
+        if (obj1.link.has_value() || obj2.link.has_value()) {
+            throw std::logic_error("object is already bound");
+        }
+        obj1.link = &obj2;
+        obj2.link = &obj1;
+    }
+
+    template<typename Derived, typename Derived1>
+    class Bound {
+    private:
+        std::optional<Derived1 *> link;
+
+    public:
+        Bound() : link(std::nullopt) {}
+
+        Bound(const Bound &) = delete;
+
+        Bound(Bound &&other) noexcept : link(other.link) {
+            other.link = std::nullopt;
+            if (link.has_value() && link.value()) {
+                static_cast<Bound<Derived1, Derived> *>(link.value())->link = this;
+            }
+        }
+
+        Bound &operator=(const Bound &) = delete;
+
+        Bound &operator=(Bound &&other) noexcept {
+            if (link.has_value() && link.value()) {
+                static_cast<Bound<Derived1, Derived> *>(link.value())->link = nullptr;
+            }
+            link = other.link;
+            other.link = std::nullopt;
+            if (link.has_value() && link.value()) {
+                static_cast<Bound<Derived1, Derived> *>(link.value())->link = this;
+            }
+        }
+
+        virtual ~Bound() {
+            if (link.has_value() && link.value()) {
+                static_cast<Bound<Derived1, Derived> *>(link.value())->link = nullptr;
+            }
+        }
     };
 }
