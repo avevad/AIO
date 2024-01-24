@@ -1,10 +1,14 @@
+#pragma once
+
 #include <iostream>
 #include <functional>
 #include <source_location>
 #include <variant>
 #include <optional>
 
+#define _XOPEN_SOURCE 600
 #include "ucontext.h"
+#undef _XOPEN_SOURCE
 
 namespace AIO {
 
@@ -175,6 +179,53 @@ namespace AIO {
             }
         };
 
+        class Bond {
+            std::optional<Bond *> link;
+
+        public:
+            Bond() : link(std::nullopt) {}
+
+            Bond(const Bond &) = delete;
+
+            Bond(Bond &&other) noexcept : link(other.link) {
+                other.link = std::nullopt;
+                if (link.has_value() && link.value()) {
+                    link.value()->link = this;
+                }
+            }
+
+            Bond &operator=(const Bond &) = delete;
+
+            Bond &operator=(Bond &&other) noexcept {
+                if (link.has_value() && link.value()) {
+                    link.value()->link = nullptr;
+                }
+                link = other.link;
+                other.link = std::nullopt;
+                if (link.has_value() && link.value()) {
+                    link.value()->link = this;
+                }
+                return *this;
+            }
+
+            virtual ~Bond() {
+                if (link.has_value() && link.value()) {
+                    link.value()->link = nullptr;
+                }
+            }
+
+            static void bind(Bond &obj1, Bond &obj2) {
+                if (obj1.link.has_value() || obj2.link.has_value()) {
+                    assertion_failed("object is already bound");
+                }
+                obj1.link = &obj2;
+                obj2.link = &obj1;
+            }
+
+            [[nodiscard]] Bond *get_link() const {
+                return link.value();
+            }
+        };
     }
 
     template<typename Signature>
@@ -262,51 +313,5 @@ namespace AIO {
         using _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>::is_dead;
         using _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>::kill;
 
-    };
-
-    template<typename Bound1, typename Bound2>
-    static void bind_objects(Bound1 &obj1, Bound2 &obj2) {
-        if (obj1.link.has_value() || obj2.link.has_value()) {
-            throw std::logic_error("object is already bound");
-        }
-        obj1.link = &obj2;
-        obj2.link = &obj1;
-    }
-
-    template<typename Derived, typename Derived1>
-    class Bound {
-    private:
-        std::optional<Derived1 *> link;
-
-    public:
-        Bound() : link(std::nullopt) {}
-
-        Bound(const Bound &) = delete;
-
-        Bound(Bound &&other) noexcept : link(other.link) {
-            other.link = std::nullopt;
-            if (link.has_value() && link.value()) {
-                static_cast<Bound<Derived1, Derived> *>(link.value())->link = this;
-            }
-        }
-
-        Bound &operator=(const Bound &) = delete;
-
-        Bound &operator=(Bound &&other) noexcept {
-            if (link.has_value() && link.value()) {
-                static_cast<Bound<Derived1, Derived> *>(link.value())->link = nullptr;
-            }
-            link = other.link;
-            other.link = std::nullopt;
-            if (link.has_value() && link.value()) {
-                static_cast<Bound<Derived1, Derived> *>(link.value())->link = this;
-            }
-        }
-
-        virtual ~Bound() {
-            if (link.has_value() && link.value()) {
-                static_cast<Bound<Derived1, Derived> *>(link.value())->link = nullptr;
-            }
-        }
     };
 }
