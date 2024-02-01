@@ -6,6 +6,7 @@
 #include <variant>
 #include <optional>
 #include <type_traits>
+#include <queue>
 
 #include "ucontext.h"
 
@@ -83,6 +84,7 @@ namespace AIO {
             CoroutineCore &operator=(const CoroutineCore &coroutine) = delete;
 
             ~CoroutineCore() {
+                if (!context.uc_link) return;
                 if (!dead) kill();
                 swapcontext(&ret_context, &context);
             }
@@ -156,6 +158,7 @@ namespace AIO {
         class CoroutineBase<Ret(Arg), Derived> : public CoroutineCore<Ret(Arg)> {
         public:
             CoroutineBase() : CoroutineCore<Ret(Arg)>(entrypoint) {}
+
         private:
             void start() {
                 try {
@@ -225,6 +228,8 @@ namespace AIO {
         };
     }
 
+    class EventLoop;
+
     template<typename Signature>
     class Coroutine {
     };
@@ -237,7 +242,7 @@ namespace AIO {
         requires (!std::is_same_v<FunctorDec, Coroutine>)
         Coroutine(Functor &&start_fn) : // NOLINT(*-explicit-constructor, *-forwarding-reference-overload)
                 std::move_only_function<Ret(Arg)>([start_fn = std::forward<Functor>(start_fn)](auto arg) {
-                        return start_fn(arg);
+                    return start_fn(arg);
                 }) {}
 
 
@@ -257,7 +262,8 @@ namespace AIO {
     };
 
     template<typename Ret>
-    class Coroutine<Ret()> : _impl::CoroutineBase<Ret(_impl::coroutine_void_t), Coroutine<Ret()>>, std::move_only_function<Ret(_impl::coroutine_void_t)> {
+    class Coroutine<Ret()> : _impl::CoroutineBase<Ret(_impl::coroutine_void_t), Coroutine<Ret()>>,
+                             std::move_only_function<Ret(_impl::coroutine_void_t)> {
         friend _impl::CoroutineBase<Ret(_impl::coroutine_void_t), Coroutine>;
     public:
         template<typename Functor, typename FunctorDec = std::decay_t<Functor>>
@@ -270,7 +276,8 @@ namespace AIO {
 
 
         Ret resume() {
-            return _impl::CoroutineBase<Ret(_impl::coroutine_void_t), Coroutine>::resume_impl(_impl::coroutine_void_t{});
+            return _impl::CoroutineBase<Ret(_impl::coroutine_void_t), Coroutine>::resume_impl(
+                    _impl::coroutine_void_t{});
         }
 
         template<typename YieldRet>
@@ -283,7 +290,8 @@ namespace AIO {
     };
 
     template<typename Arg>
-    class Coroutine<void(Arg)> : _impl::CoroutineBase<_impl::coroutine_void_t(Arg), Coroutine<void(Arg)>>, std::move_only_function<_impl::coroutine_void_t(Arg)> {
+    class Coroutine<void(Arg)> : _impl::CoroutineBase<_impl::coroutine_void_t(Arg), Coroutine<void(Arg)>>,
+                                 std::move_only_function<_impl::coroutine_void_t(Arg)> {
         friend _impl::CoroutineBase<_impl::coroutine_void_t(Arg), Coroutine>;
     public:
         template<typename Functor, typename FunctorDec = std::decay_t<Functor>>
@@ -309,14 +317,17 @@ namespace AIO {
     };
 
     template<>
-    class Coroutine<void()> : _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t), Coroutine<void()>>, std::move_only_function<_impl::coroutine_void_t(_impl::coroutine_void_t)> {
+    class Coroutine<void()> : _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t), Coroutine<void()>>,
+                              std::move_only_function<_impl::coroutine_void_t(_impl::coroutine_void_t)> {
         friend CoroutineBase;
+        friend EventLoop;
     public:
         template<typename Functor, typename FunctorDec = std::decay_t<Functor>>
         requires (!std::is_same_v<FunctorDec, Coroutine>)
         Coroutine(Functor &&start_fn) : // NOLINT(*-explicit-constructor, *-forwarding-reference-overload)
                 std::move_only_function<_impl::coroutine_void_t(_impl::coroutine_void_t)>(
-                        [start_fn = std::forward<Functor>(start_fn)](_impl::coroutine_void_t) -> _impl::coroutine_void_t {
+                        [start_fn = std::forward<Functor>(start_fn)](
+                                _impl::coroutine_void_t) -> _impl::coroutine_void_t {
                             start_fn();
                             return {};
                         }) {}
@@ -334,13 +345,12 @@ namespace AIO {
 
     };
 
-    class EventLoop;
-
     template<typename Ret>
     class Promise;
 
     template<typename Ret>
-    class Future final : _impl::Bond, _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t), Future<Ret>> {
+    class Future final
+            : _impl::Bond, _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t), Future<Ret>> {
         friend EventLoop;
         friend Promise<Ret>;
         friend _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t), Future<Ret>>;
@@ -380,33 +390,48 @@ namespace AIO {
     };
 
     class EventLoop {
-        using FutureCoroutine = _impl::CoroutineCore<_impl::coroutine_void_t(_impl::coroutine_void_t)>;
-
         template<typename Ret>
         friend
         class Future;
 
     protected:
+        using FutureCoroutine = _impl::CoroutineCore<_impl::coroutine_void_t(_impl::coroutine_void_t)>;
+
         virtual void set_current_coroutine(FutureCoroutine *cor) = 0;
 
-        virtual FutureCoroutine *get_current_coroutine() = 0;
+        [[nodiscard]] virtual FutureCoroutine *get_current_coroutine() const = 0;
 
     public:
-        virtual void add_task(const std::move_only_function<void()> &fn) = 0;
+        virtual void add_task(std::move_only_function<void()> fn) = 0;
+
+        void add_coroutine(Coroutine<void()> &cor) {
+            add_task([this, &cor] () mutable -> void {
+                set_current_coroutine(&cor);
+                cor.resume();
+                set_current_coroutine(nullptr);
+            });
+        }
 
         template<typename Functor, typename... Args>
         Future<std::result_of_t<Functor(Args...)>> async_call(Functor &&fn, Args &&... args) {
-            Future<std::result_of_t<Functor(Args...)>> future(this, [fn = std::forward<Functor>(fn), args = std::tuple<Args...>(std::forward<Args>(args)...)]() -> std::result_of_t<Functor(Args...)> {
+            Future<std::result_of_t<Functor(Args...)>> future(this, [fn = std::forward<Functor>(
+                    fn), args = std::tuple<Args...>(std::forward<Args>(args)...)]() -> std::result_of_t<Functor(
+                    Args...)> {
                 return std::apply(fn, args);
             });
             Promise<std::result_of_t<Functor(Args...)>> promise;
             _impl::Bond::bind(future, promise);
-            add_task([this, promise = std::move(promise)] () -> void {
+            add_task([this, promise = std::move(promise)]() -> void {
                 set_current_coroutine(&promise.future());
                 promise.future().resume_impl(_impl::coroutine_void_t{});
                 set_current_coroutine(nullptr);
             });
             return future;
+        }
+
+        template<typename Functor>
+        auto async(Functor &&fn) {
+            return [this, fn = std::forward<Functor>(fn)] <typename... Args> (Args &&... args) -> auto { return async_call(fn, args...); };
         }
     };
 
@@ -429,4 +454,40 @@ namespace AIO {
         cons->yield_impl(_impl::coroutine_void_t{});
         return std::move(ret.value());
     }
+
+    class SynchronousEventLoop final : public EventLoop {
+        FutureCoroutine *cur = nullptr;
+        std::queue<std::move_only_function<void()>> tasks;
+
+    protected:
+        void set_current_coroutine(AIO::EventLoop::FutureCoroutine *cor) override {
+            cur = cor;
+        }
+
+        [[nodiscard]] FutureCoroutine *get_current_coroutine() const override {
+            return cur;
+        }
+
+    public:
+        void add_task(std::move_only_function<void()> fn) override {
+            tasks.emplace(std::forward<std::move_only_function<void()>>(fn));
+        }
+
+        void run() {
+            while (!tasks.empty()) {
+                tasks.front()();
+                tasks.pop();
+            }
+        }
+
+        template<typename Functor>
+        static void create_and_run(Functor &&fn) {
+            SynchronousEventLoop loop;
+            Coroutine<void()> cor = [&loop, fn = std::forward<Functor>(fn)] () -> void {
+                fn(loop);
+            };
+            loop.add_coroutine(cor);
+            loop.run();
+        }
+    };
 }
