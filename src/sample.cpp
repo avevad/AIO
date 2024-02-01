@@ -3,7 +3,7 @@
 static constexpr size_t N = 30;
 
 int main() {
-    AIO::Coroutine<size_t()> fib = [&fib] [[noreturn]]() -> size_t {
+    AIO::Coroutine<size_t()> fib = [&fib] [[noreturn]] () -> size_t {
         size_t prev_num = 0, cur_num = 1;
         while (true) {
             fib.yield(cur_num);

@@ -13,13 +13,13 @@ namespace AIO {
 
     namespace _impl {
 
-        static const constexpr size_t COROUTINE_STACK_SIZE_BYTES = 64 * 1024 * 1024;
+        static constexpr size_t COROUTINE_STACK_SIZE_BYTES = 64 * 1024 * 1024;
 
-        thread_local void *volatile current_coroutine = nullptr;
+        inline thread_local void *volatile current_coroutine = nullptr;
 
 
-        [[noreturn]] void assertion_failed(const std::string &what,
-                                           std::source_location where = std::source_location::current()) {
+        [[noreturn]] inline void assertion_failed(const std::string &what,
+                                                  const std::source_location where = std::source_location::current()) {
             std::cerr << std::string(where.file_name()) + ":" + std::to_string(where.line()) + ":" +
                          std::to_string(where.column()) + ": function ‘" + where.function_name() +
                          "’: assertion failed: " + what << std::endl;
@@ -32,16 +32,16 @@ namespace AIO {
         struct coroutine_void_t {
         };
 
-        template<typename Signature, typename Derived>
-        class CoroutineBase;
+        template<typename Signature>
+        class CoroutineCore;
 
         struct coroutine_kill {
         private:
             bool handled = false;
 
-            template<typename Signature, typename Derived>
+            template<typename Signature>
             friend
-            class CoroutineBase;
+            class CoroutineCore;
 
         public:
             ~coroutine_kill() noexcept(false) {
@@ -49,8 +49,9 @@ namespace AIO {
             }
         };
 
-        template<typename Ret, typename Arg, typename Derived>
-        class CoroutineBase<Ret(Arg), Derived> {
+        template<typename Ret, typename Arg>
+        class CoroutineCore<Ret(Arg)> {
+        protected:
             ucontext_t context{}, ret_context{};
             std::optional<std::tuple<Arg &>> arg_ref = std::nullopt;
             std::optional<std::tuple<Ret &>> ret_ref = std::nullopt;
@@ -59,7 +60,7 @@ namespace AIO {
             bool dead = false;
 
         public:
-            CoroutineBase() : stack(COROUTINE_STACK_SIZE_BYTES) {
+            explicit CoroutineCore(void (*entrypoint)()) : stack(COROUTINE_STACK_SIZE_BYTES) {
                 getcontext(&context);
                 context.uc_link = nullptr;
                 context.uc_stack.ss_sp = stack.data();
@@ -67,29 +68,26 @@ namespace AIO {
                 makecontext(&context, entrypoint, 0);
             }
 
-            CoroutineBase(CoroutineBase &&other) noexcept: CoroutineBase() {
+            CoroutineCore(CoroutineCore &&other) noexcept: CoroutineCore(nullptr) {
                 this->swap(other);
             }
 
-
-            CoroutineBase &operator=(CoroutineBase &&other) noexcept {
-                using std::move_only_function<Ret(Arg)>::operator=;
+            CoroutineCore &operator=(CoroutineCore &&other) noexcept {
                 if (&other == this) return *this;
-                CoroutineBase junk;
+                CoroutineCore junk;
                 this->swap(junk);
                 this->swap(other);
                 return *this;
             }
 
-            CoroutineBase &operator=(const CoroutineBase &coroutine) = delete;
+            CoroutineCore &operator=(const CoroutineCore &coroutine) = delete;
 
-            ~CoroutineBase() {
+            ~CoroutineCore() {
                 if (!dead) kill();
                 swapcontext(&ret_context, &context);
             }
 
-            void swap(CoroutineBase &other) noexcept {
-                using std::move_only_function<Ret(Arg)>::swap;
+            void swap(CoroutineCore &other) noexcept {
                 std::swap(context, other.context);
                 std::swap(ret_context, other.ret_context);
                 std::swap(arg_ref, other.arg_ref);
@@ -98,26 +96,22 @@ namespace AIO {
                 std::swap(dead, other.dead);
             }
 
-            bool is_dead() { return dead; }
+            bool is_dead() const { return dead; }
 
             void kill() {
                 if (dead) assertion_failed("attempt to kill dead coroutine");
-                if (current_coroutine == this) {
-                    throw coroutine_kill(); // NOLINT(*-exception-baseclass)
-                } else {
-                    void *prev_coroutine = current_coroutine;
-                    current_coroutine = this;
-                    swapcontext(&ret_context, &context);
-                    current_coroutine = prev_coroutine;
-                    try {
-                        throw;
-                    } catch (coroutine_kill &kill) {
-                        kill.handled = true;
-                    }
+                if (current_coroutine == this) throw coroutine_kill(); // NOLINT(*-exception-baseclass)
+                void *prev_coroutine = current_coroutine;
+                current_coroutine = this;
+                swapcontext(&ret_context, &context);
+                current_coroutine = prev_coroutine;
+                try {
+                    throw;
+                } catch (coroutine_kill &kill) {
+                    kill.handled = true;
                 }
             }
 
-        protected:
             template<typename ResumeArg>
             Ret resume_impl(ResumeArg &&arg) {
                 if (current_coroutine == this) assertion_failed("attempt to resume current coroutine");
@@ -153,24 +147,32 @@ namespace AIO {
                 swapcontext(&context, &ret_context);
                 throw coroutine_finish(); // NOLINT(*-exception-baseclass)
             }
+        };
 
+        template<typename Signature, typename Derived>
+        class CoroutineBase;
+
+        template<typename Ret, typename Arg, typename Derived>
+        class CoroutineBase<Ret(Arg), Derived> : public CoroutineCore<Ret(Arg)> {
+        public:
+            CoroutineBase() : CoroutineCore<Ret(Arg)>(entrypoint) {}
         private:
             void start() {
                 try {
-                    auto &arg = std::get<0>(arg_ref.value());
-                    arg_ref.reset();
-                    yield_impl((*static_cast<Derived *>(this))(arg), true);
+                    auto &arg = std::get<0>(CoroutineCore<Ret(Arg)>::arg_ref.value());
+                    CoroutineCore<Ret(Arg)>::arg_ref.reset();
+                    CoroutineCore<Ret(Arg)>::yield_impl((*static_cast<Derived *>(this))(arg), true);
                 } catch (coroutine_finish) {
                 } catch (...) {
                     try {
-                        yield_err();
+                        CoroutineCore<Ret(Arg)>::yield_err();
                     } catch (coroutine_finish) {}
                 }
-                swapcontext(&context, &ret_context);
+                swapcontext(&(CoroutineCore<Ret(Arg)>::context), &(CoroutineCore<Ret(Arg)>::ret_context));
             }
 
             static void entrypoint() {
-                reinterpret_cast<CoroutineBase *>(current_coroutine)->start();
+                static_cast<CoroutineBase *>(current_coroutine)->start();
             }
         };
 
@@ -227,14 +229,32 @@ namespace AIO {
     class Coroutine {
     };
 
-//    template<typename Ret, typename Arg>
-//    class Coroutine<Ret(Arg)> : public _impl::CoroutineBase<Ret(Arg)> {
-//    public:
-//        using _impl::CoroutineBase<Ret(Arg)>::_impl::CoroutineImpl;
-//
-//        using _impl::CoroutineBase<Ret(Arg)>::is_dead;
-//        using _impl::CoroutineBase<Ret(Arg)>::kill;
-//    };
+    template<typename Ret, typename Arg>
+    class Coroutine<Ret(Arg)> : _impl::CoroutineBase<Ret(Arg), Coroutine<Ret(Arg)>>, std::move_only_function<Ret(Arg)> {
+        friend _impl::CoroutineBase<Ret(Arg), Coroutine>;
+    public:
+        template<typename Functor, typename FunctorDec = std::decay_t<Functor>>
+        requires (!std::is_same_v<FunctorDec, Coroutine>)
+        Coroutine(Functor &&start_fn) : // NOLINT(*-explicit-constructor, *-forwarding-reference-overload)
+                std::move_only_function<Ret(Arg)>([start_fn = std::forward<Functor>(start_fn)](auto arg) {
+                        return start_fn(arg);
+                }) {}
+
+
+        template<typename ResumeArg>
+        Ret resume(ResumeArg &&arg) {
+            return resume_impl(arg);
+        }
+
+        template<typename YieldRet>
+        Arg yield(YieldRet &&ret) {
+            return yield_impl(ret);
+        }
+
+        using _impl::CoroutineBase<Ret(Arg), Coroutine>::is_dead;
+        using _impl::CoroutineBase<Ret(Arg), Coroutine>::kill;
+
+    };
 
     template<typename Ret>
     class Coroutine<Ret()> : _impl::CoroutineBase<Ret(_impl::coroutine_void_t), Coroutine<Ret()>>, std::move_only_function<Ret(_impl::coroutine_void_t)> {
@@ -242,7 +262,7 @@ namespace AIO {
     public:
         template<typename Functor, typename FunctorDec = std::decay_t<Functor>>
         requires (!std::is_same_v<FunctorDec, Coroutine>)
-        Coroutine(Functor &&start_fn) : // NOLINT(*-explicit-constructor)
+        Coroutine(Functor &&start_fn) : // NOLINT(*-explicit-constructor, *-forwarding-reference-overload)
                 std::move_only_function<Ret(_impl::coroutine_void_t)>(
                         [start_fn = std::forward<Functor>(start_fn)](_impl::coroutine_void_t) {
                             return start_fn();
@@ -262,145 +282,151 @@ namespace AIO {
         using _impl::CoroutineBase<Ret(_impl::coroutine_void_t), Coroutine>::kill;
     };
 
-//    template<typename Arg>
-//    class Coroutine<void(Arg)> : private _impl::CoroutineBase<_impl::coroutine_void_t(Arg)> {
-//    public:
-//        template<typename Functor, typename FunctorDec = std::decay_t<Functor>>
-//        requires (!std::is_same_v<FunctorDec, Coroutine>)
-//        Coroutine(Functor &&start_fn) : // NOLINT(*-explicit-constructor)
-//                _impl::CoroutineBase<_impl::coroutine_void_t(Arg)>(
-//                        [start_fn = std::forward<Functor>(start_fn)](auto arg) -> _impl::coroutine_void_t {
-//                            start_fn(arg);
-//                            return {};
-//                        }) {}
-//
-//        template<typename ResumeArg>
-//        void resume(ResumeArg &&arg) {
-//            _impl::CoroutineBase<_impl::coroutine_void_t(Arg)>::resume_impl(arg);
-//        }
-//
-//        Arg yield() {
-//            return _impl::CoroutineBase<_impl::coroutine_void_t(Arg)>::yield_impl(_impl::coroutine_void_t{});
-//        }
-//
-//        using _impl::CoroutineBase<_impl::coroutine_void_t(Arg)>::is_dead;
-//        using _impl::CoroutineBase<_impl::coroutine_void_t(Arg)>::kill;
-//    };
-//
-//    template<>
-//    class Coroutine<void()> : private _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)> {
-//    public:
-//        template<typename Functor, typename FunctorDec = std::decay_t<Functor>>
-//        requires (!std::is_same_v<FunctorDec, Coroutine>)
-//        Coroutine(Functor &&start_fn) : // NOLINT(*-explicit-constructor)
-//                _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>(
-//                        [start_fn = std::forward<Functor>(start_fn)](_impl::coroutine_void_t) -> _impl::coroutine_void_t {
-//                            start_fn();
-//                            return {};
-//                        }) {}
-//
-//        void resume() {
-//            _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>::resume_impl(
-//                    _impl::coroutine_void_t{});
-//        }
-//
-//        void yield() {
-//            _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>::yield_impl(
-//                    _impl::coroutine_void_t{});
-//        }
-//
-//        using _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>::is_dead;
-//        using _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t)>::kill;
-//
-//    };
-//
-//    class EventLoop;
-//
-//    template<typename Ret>
-//    class Promise;
-//
-//    template<typename Ret>
-//    class Future final : _impl::Bond {
-//        EventLoop *loop;
-//        std::optional<Ret> ret;
-//        Coroutine<void()> prod, *cons = nullptr;
-//
-//        friend EventLoop;
-//        friend Promise<Ret>;
-//
-//        explicit Future(EventLoop *loop, Coroutine<void()> cor) : loop(loop), prod(std::move(cor)) {}
-//
-//        Future(Future &&) = default;
-//
-//        Future &operator=(Future &&) = default;
-//
-//    public:
-//        Ret await();
-//
-//        ~Future() override {
-//            if (!cons) _impl::assertion_failed("future was never awaited");
-//        }
-//    };
-//
-//
-//    template<typename Ret>
-//    class Promise final : _impl::Bond {
-//        friend EventLoop;
-//
-//        Promise() = default;
-//
-//    public:
-//        Future<Ret> &future() const {
-//            return *static_cast<Future<Ret> *>(get_link());
-//        }
-//    };
-//
-//    class EventLoop {
-//        template<typename Ret>
-//        friend
-//        class Future;
-//
-//    protected:
-//        virtual void set_current_coroutine(Coroutine<void()> *cor) = 0;
-//
-//        virtual Coroutine<void()> *get_current_coroutine() = 0;
-//
-//        Coroutine<void()> *swap_coroutine(Coroutine<void()> *cor) {
-//            Coroutine<void()> *cur = get_current_coroutine();
-//            set_current_coroutine(cor);
-//            return cur;
-//        }
-//
-//    public:
-//        virtual void add_task(const std::move_only_function<void()> &fn) = 0;
-//
-//        template<typename F, typename... Args>
-//        Future<std::result_of_t<F(Args...)>> async_call(F fn, Args &&... args) {
-//            Promise<std::result_of_t<F(Args...)>> promise;
-//            Future<std::result_of_t<F(Args...)>> future(this, [this, promise = std::move(promise), fn = std::move(fn), args_tup = std::make_tuple(args...)]() -> void {
-//                promise.future().ret = std::apply(fn, args_tup);
-//                add_task([this, promise = Promise<int>()]() -> void {
-//                    set_current_coroutine(&promise.future().prod);
-//                    promise.future().prod.resume();
-//                    set_current_coroutine(nullptr);
-//                });
-//            });
-//            _impl::Bond::bind(future, promise);
-//            return future;
-//        }
-//
-//        template<typename Ret, typename... Args>
-//        std::move_only_function<Future<Ret>(Args...)> async(const std::move_only_function<Ret(Args...)> &fn) {
-//            return [this, &fn](Args &&... args) -> Ret { return async_call(fn); };
-//        }
-//    };
-//
-//    template<typename Ret>
-//    Ret Future<Ret>::await() {
-//        if (cons) _impl::assertion_failed("future was already awaited");
-//        cons = loop->get_current_coroutine();
-//        if (!cons) _impl::assertion_failed("await() in synchronous context");
-//        cons->yield();
-//        return std::move(ret.value());
-//    }
+    template<typename Arg>
+    class Coroutine<void(Arg)> : _impl::CoroutineBase<_impl::coroutine_void_t(Arg), Coroutine<void(Arg)>>, std::move_only_function<_impl::coroutine_void_t(Arg)> {
+        friend _impl::CoroutineBase<_impl::coroutine_void_t(Arg), Coroutine>;
+    public:
+        template<typename Functor, typename FunctorDec = std::decay_t<Functor>>
+        requires (!std::is_same_v<FunctorDec, Coroutine>)
+        Coroutine(Functor &&start_fn) : // NOLINT(*-explicit-constructor, *-forwarding-reference-overload)
+                std::move_only_function<_impl::coroutine_void_t(Arg)>(
+                        [start_fn = std::forward<Functor>(start_fn)](auto arg) -> _impl::coroutine_void_t {
+                            start_fn(arg);
+                            return {};
+                        }) {}
+
+        template<typename ResumeArg>
+        void resume(ResumeArg &&arg) {
+            _impl::CoroutineBase<_impl::coroutine_void_t(Arg), Coroutine>::resume_impl(arg);
+        }
+
+        Arg yield() {
+            return _impl::CoroutineBase<_impl::coroutine_void_t(Arg), Coroutine>::yield_impl(_impl::coroutine_void_t{});
+        }
+
+        using _impl::CoroutineBase<_impl::coroutine_void_t(Arg), Coroutine>::is_dead;
+        using _impl::CoroutineBase<_impl::coroutine_void_t(Arg), Coroutine>::kill;
+    };
+
+    template<>
+    class Coroutine<void()> : _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t), Coroutine<void()>>, std::move_only_function<_impl::coroutine_void_t(_impl::coroutine_void_t)> {
+        friend CoroutineBase;
+    public:
+        template<typename Functor, typename FunctorDec = std::decay_t<Functor>>
+        requires (!std::is_same_v<FunctorDec, Coroutine>)
+        Coroutine(Functor &&start_fn) : // NOLINT(*-explicit-constructor, *-forwarding-reference-overload)
+                std::move_only_function<_impl::coroutine_void_t(_impl::coroutine_void_t)>(
+                        [start_fn = std::forward<Functor>(start_fn)](_impl::coroutine_void_t) -> _impl::coroutine_void_t {
+                            start_fn();
+                            return {};
+                        }) {}
+
+        void resume() {
+            resume_impl(_impl::coroutine_void_t{});
+        }
+
+        void yield() {
+            yield_impl(_impl::coroutine_void_t{});
+        }
+
+        using CoroutineBase::is_dead;
+        using CoroutineBase::kill;
+
+    };
+
+    class EventLoop;
+
+    template<typename Ret>
+    class Promise;
+
+    template<typename Ret>
+    class Future final : _impl::Bond, _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t), Future<Ret>> {
+        friend EventLoop;
+        friend Promise<Ret>;
+        friend _impl::CoroutineBase<_impl::coroutine_void_t(_impl::coroutine_void_t), Future<Ret>>;
+
+        EventLoop *loop;
+        std::optional<Ret> ret;
+        _impl::CoroutineCore<_impl::coroutine_void_t(_impl::coroutine_void_t)> *cons = nullptr;
+        std::move_only_function<Ret()> fn;
+
+        template<typename Functor>
+        explicit Future(EventLoop *loop, Functor &&fn) : loop(loop), fn(std::forward<Functor>(fn)) {}
+
+        Future(Future &&) = default;
+
+        Future &operator=(Future &&) = default;
+
+        _impl::coroutine_void_t operator()(_impl::coroutine_void_t);
+
+    public:
+        Ret await();
+
+        ~Future() override {
+            if (!cons) _impl::assertion_failed("future was never awaited");
+        }
+    };
+
+    template<typename Ret>
+    class Promise final : _impl::Bond {
+        friend EventLoop;
+
+        Promise() = default;
+
+    public:
+        Future<Ret> &future() const {
+            return *static_cast<Future<Ret> *>(get_link());
+        }
+    };
+
+    class EventLoop {
+        using FutureCoroutine = _impl::CoroutineCore<_impl::coroutine_void_t(_impl::coroutine_void_t)>;
+
+        template<typename Ret>
+        friend
+        class Future;
+
+    protected:
+        virtual void set_current_coroutine(FutureCoroutine *cor) = 0;
+
+        virtual FutureCoroutine *get_current_coroutine() = 0;
+
+    public:
+        virtual void add_task(const std::move_only_function<void()> &fn) = 0;
+
+        template<typename Functor, typename... Args>
+        Future<std::result_of_t<Functor(Args...)>> async_call(Functor &&fn, Args &&... args) {
+            Future<std::result_of_t<Functor(Args...)>> future(this, [fn = std::forward<Functor>(fn), args = std::tuple<Args...>(std::forward<Args>(args)...)]() -> std::result_of_t<Functor(Args...)> {
+                return std::apply(fn, args);
+            });
+            Promise<std::result_of_t<Functor(Args...)>> promise;
+            _impl::Bond::bind(future, promise);
+            add_task([this, promise = std::move(promise)] () -> void {
+                set_current_coroutine(&promise.future());
+                promise.future().resume_impl(_impl::coroutine_void_t{});
+                set_current_coroutine(nullptr);
+            });
+            return future;
+        }
+    };
+
+    template<typename Ret>
+    _impl::coroutine_void_t Future<Ret>::operator()(_impl::coroutine_void_t) {
+        ret = fn();
+        loop->add_task([ev_loop = this->loop, cons_cor = this->cons]() -> void {
+            ev_loop->set_current_coroutine(cons_cor);
+            cons_cor->resume_impl(_impl::coroutine_void_t{});
+            ev_loop->set_current_coroutine(nullptr);
+        });
+        return {};
+    }
+
+    template<typename Ret>
+    Ret Future<Ret>::await() {
+        if (cons) _impl::assertion_failed("future was already awaited");
+        cons = loop->get_current_coroutine();
+        if (!cons) _impl::assertion_failed("await() in synchronous context");
+        cons->yield_impl(_impl::coroutine_void_t{});
+        return std::move(ret.value());
+    }
 }
