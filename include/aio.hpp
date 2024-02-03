@@ -357,11 +357,12 @@ namespace AIO {
 
         EventLoop *loop;
         std::optional<Ret> ret;
-        _impl::CoroutineCore<_impl::coroutine_void_t(_impl::coroutine_void_t)> *cons = nullptr;
         std::move_only_function<Ret()> fn;
+        std::optional<std::move_only_function<void()>> cons;
+        std::optional<_impl::coroutine_void_t> valid;
 
         template<typename Functor>
-        explicit Future(EventLoop *loop, Functor &&fn) : loop(loop), fn(std::forward<Functor>(fn)) {}
+        explicit Future(EventLoop *loop, Functor &&fn) : valid({}), loop(loop), fn(std::forward<Functor>(fn)) {}
 
         Future(Future &&) = default;
 
@@ -370,10 +371,15 @@ namespace AIO {
         _impl::coroutine_void_t operator()(_impl::coroutine_void_t);
 
     public:
+        using ReturnType = Ret;
+
         Ret await();
 
+        template<typename AsyncFunctor>
+        Future<typename std::result_of_t<AsyncFunctor(Ret)>::ReturnType> then(AsyncFunctor &&async_fn);
+
         ~Future() override {
-            if (!cons) _impl::assertion_failed("future was never awaited");
+            if (valid.has_value() && !cons.has_value()) _impl::assertion_failed("future was never awaited");
         }
     };
 
@@ -401,11 +407,11 @@ namespace AIO {
 
         [[nodiscard]] virtual FutureCoroutine *get_current_coroutine() const = 0;
 
-    public:
         virtual void add_task(std::move_only_function<void()> fn) = 0;
 
+    public:
         void add_coroutine(Coroutine<void()> &cor) {
-            add_task([this, &cor] () mutable -> void {
+            add_task([this, &cor]() mutable -> void {
                 set_current_coroutine(&cor);
                 cor.resume();
                 set_current_coroutine(nullptr);
@@ -414,9 +420,7 @@ namespace AIO {
 
         template<typename Functor, typename... Args>
         Future<std::result_of_t<Functor(Args...)>> async_call(Functor &&fn, Args &&... args) {
-            Future<std::result_of_t<Functor(Args...)>> future(this, [fn = std::forward<Functor>(
-                    fn), args = std::tuple<Args...>(std::forward<Args>(args)...)]() -> std::result_of_t<Functor(
-                    Args...)> {
+            Future<std::result_of_t<Functor(Args...)>> future(this, [fn = std::forward<Functor>(fn), args = std::tuple<Args...>(std::forward<Args>(args)...)]() -> std::result_of_t<Functor(Args...)> {
                 return std::apply(fn, args);
             });
             Promise<std::result_of_t<Functor(Args...)>> promise;
@@ -438,21 +442,31 @@ namespace AIO {
     template<typename Ret>
     _impl::coroutine_void_t Future<Ret>::operator()(_impl::coroutine_void_t) {
         ret = fn();
-        loop->add_task([ev_loop = this->loop, cons_cor = this->cons]() -> void {
-            ev_loop->set_current_coroutine(cons_cor);
-            cons_cor->resume_impl(_impl::coroutine_void_t{});
-            ev_loop->set_current_coroutine(nullptr);
-        });
+        if (cons.has_value()) (cons.value())();
         return {};
     }
 
     template<typename Ret>
     Ret Future<Ret>::await() {
-        if (cons) _impl::assertion_failed("future was already awaited");
-        cons = loop->get_current_coroutine();
-        if (!cons) _impl::assertion_failed("await() in synchronous context");
-        cons->yield_impl(_impl::coroutine_void_t{});
+        if (cons.has_value()) _impl::assertion_failed("future already has a consumer");
+        auto *cons_cor = loop->get_current_coroutine();
+        if (!cons_cor) _impl::assertion_failed("await() in synchronous context");
+        cons = [cons_cor, ev_loop = this->loop] () -> void {
+            ev_loop->add_task([cons_cor, ev_loop] () -> void {
+                ev_loop->set_current_coroutine(cons_cor);
+                cons_cor->resume_impl(_impl::coroutine_void_t{});
+                ev_loop->set_current_coroutine(nullptr);
+            });
+        };
+        if (!ret.has_value()) cons_cor->yield_impl(_impl::coroutine_void_t{});
         return std::move(ret.value());
+    }
+
+    template<typename Ret>
+    template<typename AsyncFunctor>
+    Future<typename std::result_of_t<AsyncFunctor(Ret)>::ReturnType> Future<Ret>::then(AsyncFunctor &&async_fn) {
+        auto *ev_loop = this->loop;
+        return ev_loop->async_call([async_fn = std::forward<AsyncFunctor>(async_fn), self = std::move(*this)] () { return async_fn(const_cast<Future &>(self).await()).await(); });
     }
 
     class SynchronousEventLoop final : public EventLoop {
@@ -468,10 +482,11 @@ namespace AIO {
             return cur;
         }
 
-    public:
         void add_task(std::move_only_function<void()> fn) override {
             tasks.emplace(std::forward<std::move_only_function<void()>>(fn));
         }
+
+    public:
 
         void run() {
             while (!tasks.empty()) {
@@ -483,7 +498,7 @@ namespace AIO {
         template<typename Functor>
         static void create_and_run(Functor &&fn) {
             SynchronousEventLoop loop;
-            Coroutine<void()> cor = [&loop, fn = std::forward<Functor>(fn)] () -> void {
+            Coroutine<void()> cor = [&loop, fn = std::forward<Functor>(fn)]() -> void {
                 fn(loop);
             };
             loop.add_coroutine(cor);

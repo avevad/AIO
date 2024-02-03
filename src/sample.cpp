@@ -1,6 +1,12 @@
+#include <format>
 #include "aio.hpp"
 
 static constexpr size_t N = 30;
+
+template<typename Fmt, typename... Args>
+void print(Fmt &&fmt, Args &&...args) {
+    std::cout << std::vformat(fmt, std::make_format_args(args...)) << std::endl;
+}
 
 int main() {
     std::cout << "### Fibonacci coroutine test ###" << std::endl;
@@ -21,9 +27,19 @@ int main() {
     std::cout << "### Event loop test ###" << std::endl;
     AIO::SynchronousEventLoop::create_and_run([](auto &loop) -> void {
         auto add = loop.async([](int x, int y) {
+            print("calculating {}+{}", x, y);
             return x + y;
         });
-        std::cout << add(123, 321).await() << std::endl;
+
+        auto negate = loop.async([] (auto e) -> auto {
+            print("negating {}", e);
+            return -e;
+        });
+
+        auto future = add(2, 3);
+        print("123+321={}", add(123, 321).await());
+        print("2+3={}", future.await());
+        print("-(100+200)={}", add(100, 200).then(negate).await());
     });
     std::cout << std::endl;
 }
@@ -62,7 +78,13 @@ int main() {
 29: 832040
 
 ### Event loop test ###
-444
+calculating 2+3
+calculating 123+321
+123+321=444
+2+3=5
+calculating 100+200
+negating 300
+-(100+200)=300
 
 
 Process finished with exit code 0
