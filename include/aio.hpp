@@ -7,6 +7,9 @@
 #include <optional>
 #include <type_traits>
 #include <queue>
+#include <chrono>
+#include <map>
+#include <thread>
 
 #include "ucontext.h"
 
@@ -14,7 +17,7 @@ namespace AIO {
 
     namespace _impl {
 
-        static constexpr size_t COROUTINE_STACK_SIZE_BYTES = 64 * 1024 * 1024;
+        static constexpr size_t COROUTINE_STACK_SIZE_BYTES = 16 * 1024;
 
         inline thread_local void *volatile current_coroutine = nullptr;
 
@@ -364,14 +367,14 @@ namespace AIO {
         template<typename Functor>
         explicit Future(EventLoop *loop, Functor &&fn) : valid({}), loop(loop), fn(std::forward<Functor>(fn)) {}
 
-        Future(Future &&) = default;
-
-        Future &operator=(Future &&) = default;
-
         _impl::coroutine_void_t operator()(_impl::coroutine_void_t);
 
     public:
         using ReturnType = Ret;
+
+        Future(Future &&) = default;
+
+        Future &operator=(Future &&) = default;
 
         Ret await();
 
@@ -390,7 +393,7 @@ namespace AIO {
         Promise() = default;
 
     public:
-        Future<Ret> &future() const {
+        [[nodiscard]] Future<Ret> &future() const {
             return *static_cast<Future<Ret> *>(get_link());
         }
     };
@@ -407,7 +410,12 @@ namespace AIO {
 
         [[nodiscard]] virtual FutureCoroutine *get_current_coroutine() const = 0;
 
-        virtual void add_task(std::move_only_function<void()> fn) = 0;
+        virtual void
+        add_task(std::move_only_function<void()> fn, std::chrono::time_point<std::chrono::system_clock> when) = 0;
+
+        void add_task(std::move_only_function<void()> fn) {
+            add_task(std::forward<std::move_only_function<void()>>(fn), std::chrono::system_clock::now());
+        }
 
     public:
         void add_coroutine(Coroutine<void()> &cor) {
@@ -436,6 +444,18 @@ namespace AIO {
         template<typename Functor>
         auto async(Functor &&fn) {
             return [this, fn = std::forward<Functor>(fn)] <typename... Args> (Args &&... args) -> auto { return async_call(fn, args...); };
+        }
+
+        template<typename Rep, typename Period>
+        Future<_impl::coroutine_void_t> sleep(const std::chrono::duration<Rep, Period> &dur) {
+            auto when = std::chrono::system_clock::now() + dur;
+            Future<_impl::coroutine_void_t> future(this, []() -> _impl::coroutine_void_t { return {}; });
+            Promise<_impl::coroutine_void_t> promise;
+            _impl::Bond::bind(future, promise);
+            add_task([this, promise = std::move(promise)]() -> void {
+                promise.future()({});
+            }, when);
+            return future;
         }
     };
 
@@ -466,12 +486,14 @@ namespace AIO {
     template<typename AsyncFunctor>
     Future<typename std::result_of_t<AsyncFunctor(Ret)>::ReturnType> Future<Ret>::then(AsyncFunctor &&async_fn) {
         auto *ev_loop = this->loop;
-        return ev_loop->async_call([async_fn = std::forward<AsyncFunctor>(async_fn), self = std::move(*this)] () { return async_fn(const_cast<Future &>(self).await()).await(); });
+        return ev_loop->async_call([async_fn = std::forward<AsyncFunctor>(async_fn), self = std::move(*this)]() {
+            return async_fn(const_cast<Future &>(self).await()).await();
+        });
     }
 
     class SynchronousEventLoop final : public EventLoop {
         FutureCoroutine *cur = nullptr;
-        std::queue<std::move_only_function<void()>> tasks;
+        std::multimap<std::chrono::time_point<std::chrono::system_clock>, std::move_only_function<void()>> tasks;
 
     protected:
         void set_current_coroutine(AIO::EventLoop::FutureCoroutine *cor) override {
@@ -482,16 +504,18 @@ namespace AIO {
             return cur;
         }
 
-        void add_task(std::move_only_function<void()> fn) override {
-            tasks.emplace(std::forward<std::move_only_function<void()>>(fn));
+        void
+        add_task(std::move_only_function<void()> fn, std::chrono::time_point<std::chrono::system_clock> when) override {
+            tasks.emplace(when, std::forward<std::move_only_function<void()>>(fn));
         }
 
     public:
 
         void run() {
             while (!tasks.empty()) {
-                tasks.front()();
-                tasks.pop();
+                std::this_thread::sleep_until(tasks.begin()->first);
+                tasks.begin()->second();
+                tasks.erase(tasks.begin());
             }
         }
 

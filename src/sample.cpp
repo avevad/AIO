@@ -1,5 +1,8 @@
 #include <format>
+#include <chrono>
 #include "aio.hpp"
+
+using namespace std::chrono_literals;
 
 static constexpr size_t N = 30;
 
@@ -42,6 +45,20 @@ int main() {
         print("-(100+200)={}", add(100, 200).then(negate).await());
     });
     std::cout << std::endl;
+
+    std::cout << "### Scheduler test ###" << std::endl;
+    AIO::SynchronousEventLoop::create_and_run([](auto &loop) -> void {
+        std::vector<AIO::Future<int>> futures;
+        for (int val : {7, 5, 4, 3, 9, 2, 1, 6, 8}) {
+            auto show = [val] (auto) -> auto {
+                print("{}", val);
+                return val;
+            };
+            futures.push_back(loop.sleep(val * 1ms).then(loop.async(show)));
+        }
+        for (auto &f : futures) f.await();
+    });
+    std::cout << std::endl;
 }
 
 /* Output:
@@ -78,13 +95,24 @@ int main() {
 29: 832040
 
 ### Event loop test ###
-calculating 2+3
+calculating 321+3
 calculating 123+321
 123+321=444
-2+3=5
+2+3=324
 calculating 100+200
 negating 300
--(100+200)=300
+-(100+200)=-300
+
+### Scheduler test ###
+1
+2
+3
+4
+5
+6
+7
+8
+9
 
 
 Process finished with exit code 0
