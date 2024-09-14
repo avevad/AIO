@@ -1,119 +1,26 @@
-#include <format>
-#include <chrono>
-#include "aio.hpp"
+#include "context.hpp"
 
-using namespace std::chrono_literals;
+#include <memory>
+#include <iostream>
 
-static constexpr size_t N = 30;
+AIO::aio_context context{};
 
-template<typename Fmt, typename... Args>
-void print(Fmt &&fmt, Args &&...args) {
-    std::cout << std::vformat(fmt, std::make_format_args(args...)) << std::endl;
+void subcontext_entrypoint() {
+    std::cout << "Hello from subcontext" << std::endl;
+    aio_context_switch(&context);
+    std::cout << "Subcontext will exit now" << std::endl;
 }
 
 int main() {
-    std::cout << "### Fibonacci coroutine test ###" << std::endl;
-    AIO::Coroutine<size_t()> fib = [&fib] [[noreturn]]() -> size_t {
-        size_t prev_num = 0, cur_num = 1;
-        while (true) {
-            fib.yield(cur_num);
-            size_t next_num = prev_num + cur_num;
-            prev_num = cur_num;
-            cur_num = next_num;
-        }
-    };
-    for (size_t pos = 0; pos < N; pos++) {
-        std::cout << pos << ": " << fib.resume() << std::endl;
-    }
-    std::cout << std::endl;
+    constexpr static std::size_t STACK_SIZE_BYTES = 16 * 1024; // 16 KiB
 
-    std::cout << "### Event loop test ###" << std::endl;
-    AIO::SynchronousEventLoop::create_and_run([](auto &loop) -> void {
-        auto add = loop.async([](int x, int y) {
-            print("calculating {}+{}", x, y);
-            return x + y;
-        });
+    auto stack = std::make_unique<char[]>(STACK_SIZE_BYTES);
+    char *stack_beg = stack.get();
+    aio_context_create(&context, stack_beg + STACK_SIZE_BYTES - 8, subcontext_entrypoint);
 
-        auto negate = loop.async([] (auto e) -> auto {
-            print("negating {}", e);
-            return -e;
-        });
-
-        auto future = add(2, 3);
-        print("123+321={}", add(123, 321).await());
-        print("2+3={}", future.await());
-        print("-(100+200)={}", add(100, 200).then(negate).await());
-    });
-    std::cout << std::endl;
-
-    std::cout << "### Scheduler test ###" << std::endl;
-    AIO::SynchronousEventLoop::create_and_run([](auto &loop) -> void {
-        std::vector<AIO::Future<int>> futures;
-        for (int val : {7, 5, 4, 3, 9, 2, 1, 6, 8}) {
-            auto show = [val] (auto) -> auto {
-                print("{}", val);
-                return val;
-            };
-            futures.push_back(loop.sleep(val * 1ms).then(loop.async(show)));
-        }
-        for (auto &f : futures) f.await();
-    });
-    std::cout << std::endl;
+    std::cout << "Hello from main" << std::endl;
+    aio_context_switch(&context);
+    std::cout << "Finishing the subcontext" << std::endl;
+    aio_context_switch(&context);
+    std::cout << "Done" << std::endl;
 }
-
-/* Output:
-### Fibonacci coroutine test ###
-0: 1
-1: 1
-2: 2
-3: 3
-4: 5
-5: 8
-6: 13
-7: 21
-8: 34
-9: 55
-10: 89
-11: 144
-12: 233
-13: 377
-14: 610
-15: 987
-16: 1597
-17: 2584
-18: 4181
-19: 6765
-20: 10946
-21: 17711
-22: 28657
-23: 46368
-24: 75025
-25: 121393
-26: 196418
-27: 317811
-28: 514229
-29: 832040
-
-### Event loop test ###
-calculating 321+3
-calculating 123+321
-123+321=444
-2+3=324
-calculating 100+200
-negating 300
--(100+200)=-300
-
-### Scheduler test ###
-1
-2
-3
-4
-5
-6
-7
-8
-9
-
-
-Process finished with exit code 0
-*/
