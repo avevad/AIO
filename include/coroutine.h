@@ -339,6 +339,123 @@ namespace AIO {
         }
     };
 
+    class EndGeneration final : public std::exception {
+    public:
+        EndGeneration() = default;
+
+        [[nodiscard]] const char *what() const noexcept override {
+            return "AIO::EndGeneration";
+        }
+    };
+
+    struct CoroutineIteratorEnd { };
+
+    template<typename Ret>
+    class CoroutineIterator {
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = Ret;
+        using pointer = Ret *;
+        using reference = Ret &;
+        using difference_type = std::ptrdiff_t;
+
+        explicit CoroutineIterator(Coroutine<Ret()> &coro) : coro(&coro) { }
+
+        // ReSharper disable once CppNonExplicitConvertingConstructor
+        CoroutineIterator(CoroutineIteratorEnd) { } //NOLINT(*-explicit-constructor)
+
+        CoroutineIterator(const CoroutineIterator &other) : coro(other.coro) { }
+
+        CoroutineIterator &operator=(const CoroutineIterator &other) {
+            if (&other == this)
+                return *this;
+
+            coro = other.coro;
+            return *this;
+        }
+
+        CoroutineIterator(CoroutineIterator &&) = delete;
+        CoroutineIterator &operator=(CoroutineIterator &&) = delete;
+
+        Ret &operator*() const {
+            return *this->operator->();
+        }
+
+        Ret *operator->() const {
+            obtain_value();
+
+            if (!coro)
+                assertion_failed("dereferencing singular iterator");
+
+            return &holder.value();
+        }
+
+        CoroutineIterator &operator++() {
+            obtain_value();
+
+            if (!coro)
+                assertion_failed("incrementing singular iterator");
+
+            holder.reset();
+
+            return *this;
+        }
+
+        bool operator==(const CoroutineIterator &other) const {
+            obtain_value();
+
+            return coro == nullptr && other.coro == nullptr;
+        }
+
+        bool operator!=(const CoroutineIterator &other) const {
+            return !(*this == other);
+        }
+
+    private:
+        void obtain_value() const {
+            if (!coro)
+                return;
+
+            if (holder.has_value())
+                return;
+
+            if (coro->is_dead()) {
+                coro = nullptr;
+                holder = std::nullopt;
+            }
+
+            try {
+                holder = coro->resume();
+            } catch (const EndGeneration &) {
+                coro = nullptr;
+                holder = std::nullopt;
+            }
+        }
+
+        mutable Coroutine<Ret()> *coro = nullptr;
+        mutable std::optional<Ret> holder = std::nullopt;
+    };
+
+    template<typename Ret>
+    class CoroutineGenerator {
+    public:
+        // ReSharper disable once CppNonExplicitConvertingConstructor
+        CoroutineGenerator(Coroutine<Ret()> &coro) : coro(&coro) { } // NOLINT(*-explicit-constructor)
+
+        CoroutineGenerator() = default;
+
+        CoroutineIterator<Ret> begin() const {
+            return coro ? CoroutineIterator(*coro) : CoroutineIteratorEnd();
+        }
+
+        CoroutineIterator<Ret> end() const {
+            return CoroutineIteratorEnd();
+        }
+
+    private:
+        Coroutine<Ret()> *coro = nullptr;
+    };
+
 }
 
 #endif //COROUTINE_H

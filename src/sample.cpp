@@ -31,9 +31,13 @@ void sample_contexts() {
 void sample_coroutines() {
     std::cout << "----------Coroutines----------" << std::endl;
 
+    constexpr int MAX = 100000;
     AIO::Coroutine<int()> fib = [&fib] [[noreturn]] () -> int {
         int prev = 0, cur = 1;
         while (true) {
+            if (cur > MAX)
+                throw AIO::EndGeneration();
+
             fib.yield(cur);
             const int next = prev + cur;
             prev = cur;
@@ -45,6 +49,23 @@ void sample_coroutines() {
     for (size_t i = 1; i <= N; i++) {
         std::cout << "fib[" << i << "] = " << fib.resume() << std::endl;
     }
+
+    constexpr size_t M = 5;
+    std::vector<int> more_fibs;
+    more_fibs.reserve(M);
+    std::copy_n(AIO::CoroutineIterator(fib), M, std::back_inserter(more_fibs));
+    std::cout << "More fibs: ";
+    for (const int e : more_fibs) {
+        std::cout << e << ' ';
+    }
+    std::cout << "..." << std::endl;
+
+
+    std::cout << "Until MAX=" << MAX << ": ";
+    for (const int e : AIO::CoroutineGenerator(fib)) {
+        std::cout << e << ' ';
+    }
+    std::cout << std::endl;
 }
 
 int main() {
