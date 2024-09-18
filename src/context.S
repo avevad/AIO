@@ -4,6 +4,8 @@
 
 #ifdef AIO_SYSTEM_V_AMD64_ABI
 
+    .section .note.GNU-stack,"",@progbits
+
     .text
     .global aio_context_switch
 aio_context_switch:
@@ -27,24 +29,28 @@ restore:
     .text
     .global aio_context_trampoline
 aio_context_trampoline:
+    push    rbp
+
     call    rbx
     mov     rdi, r12                                    // try to restore context
     call    aio_context_switch
 
-    ret                                                 // unreachable
+    pop     rbp                                         // unreachable
+    ret
 
     .text
     .global aio_context_create
 aio_context_create:
-    mov     QWORD PTR [rsi], 0
-    mov     QWORD PTR [rsi - 8], 0
-    lea     rsi, [rsi - 16]                             // offset new stack by 16 bytes
+    lea     rsi, [rsi + rdx]                            // calculate stack top
+    and     rsi, -0x10                                  // align stack by 16 bytes
+    sub     rsi, 8
+    mov     QWORD PTR [rsi], 0                          // store NULL return address
 
-    lea     r10, [rip+aio_context_trampoline]
+    lea     r10, [rip+aio_context_trampoline@plt]
     mov     [rdi], r10                                  // store rip
     mov     [rdi + 8], rsi                              // store rsp
     mov     [rdi + 16], rsi                             // store rbp
-    mov     [rdi + 24], rdx                             // store rbx (entrypoint)
+    mov     [rdi + 24], rcx                             // store rbx (entrypoint)
     mov     [rdi + 32], rdi                             // store r12 (context address)
 
     ret

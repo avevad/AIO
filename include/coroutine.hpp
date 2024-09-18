@@ -137,8 +137,7 @@ namespace AIO {
             std::unique_ptr<char[]> prepare_stack() {
                 auto stack = std::make_unique<char[]>(COROUTINE_STACK_SIZE);
 
-                auto *stack_top = stack.get() + COROUTINE_STACK_SIZE - sizeof(void *);
-                aio_context_create(&ctx, stack_top, entrypoint);
+                aio_context_create(&ctx, stack.get(), COROUTINE_STACK_SIZE, entrypoint);
 
                 return stack;
             }

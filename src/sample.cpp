@@ -11,7 +11,6 @@ void sample_contexts() {
     constexpr static std::size_t STACK_SIZE_BYTES = 16 * 1024; // 16 KiB
 
     const auto stack = std::make_unique<char[]>(STACK_SIZE_BYTES);
-    char *stack_beg = stack.get();
 
     auto subcontext_entrypoint = []() -> void {
         std::cout << "Hello from subcontext" << std::endl;
@@ -19,7 +18,7 @@ void sample_contexts() {
         std::cout << "Subcontext will exit now" << std::endl;
     };
 
-    aio_context_create(&context, stack_beg + STACK_SIZE_BYTES - 8, subcontext_entrypoint);
+    aio_context_create(&context, stack.get(), STACK_SIZE_BYTES, subcontext_entrypoint);
 
     std::cout << "Hello from main" << std::endl;
     aio_context_switch(&context);

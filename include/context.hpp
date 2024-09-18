@@ -3,12 +3,14 @@
 
 #include "abi.hpp"
 
+#include <cstddef>
+
 namespace AIO {
     extern "C" struct aio_context;
 
     extern "C" void aio_context_switch(aio_context *ctx);
 
-    extern "C" void aio_context_create(aio_context *ctx, void *stack, void (*entrypoint)());
+    extern "C" void aio_context_create(aio_context *ctx, void *stack, std::size_t stack_size, void (*entrypoint)());
 
 #ifdef AIO_SYSTEM_V_AMD64_ABI
     struct aio_context {
