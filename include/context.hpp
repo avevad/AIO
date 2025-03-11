@@ -1,5 +1,4 @@
-#ifndef CONTEXT_H
-#define CONTEXT_H
+#pragma once
 
 #include "abi.hpp"
 
@@ -40,6 +39,4 @@ namespace AIO {
 #else
 #error unsupported platform
 #endif
-}
-
-#endif //CONTEXT_H
+} // namespace AIO

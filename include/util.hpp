@@ -1,5 +1,4 @@
-#ifndef UTIL_H
-#define UTIL_H
+#pragma once
 
 #include <iostream>
 #include <source_location>
@@ -7,10 +6,7 @@
 
 namespace AIO {
 
-    [[noreturn]] void assertion_failed(
-        const std::string &what, std::source_location where = std::source_location::current()
-    );
+    [[noreturn]] void
+    assertion_failed(const std::string &what, std::source_location where = std::source_location::current());
 
 }
-
-#endif //UTIL_H
