@@ -1,13 +1,13 @@
 #include "context.hpp"
 #include "coroutine.hpp"
 
-#include <memory>
 #include <iostream>
+#include <memory>
 
 void sample_contexts() {
     std::cout << "-----------Contexts-----------" << std::endl;
 
-    static AIO::aio_context context { };
+    static AIO::aio_context context{};
     constexpr static std::size_t STACK_SIZE_BYTES = 16 * 1024; // 16 KiB
 
     const auto stack = std::make_unique<char[]>(STACK_SIZE_BYTES);
