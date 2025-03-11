@@ -2,6 +2,8 @@
 
 #include "aio_coroutine.hpp"
 
+#include <utility>
+
 namespace AIO::_impl {
 
     inline CoroutineKiller::CoroutineKiller() = default;
@@ -74,13 +76,13 @@ namespace AIO::_impl {
     }
 
     template<typename Ret, typename Arg, typename Derived>
-    void CoroutineBase<Ret, Arg, Derived>::entrypoint() noexcept {
+    context_t &CoroutineBase<Ret, Arg, Derived>::entrypoint() noexcept {
         try {
             Derived::entrypoint();
         } catch (...) {
             static_cast<CoroutineBase *>(current_coroutine)->yield_error_impl();
         }
-        assertion_failed("coroutine entrypoint return trap");
+        std::unreachable();
     }
 
     template<typename Ret, typename Arg, typename Derived>

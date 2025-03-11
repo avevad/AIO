@@ -5,36 +5,45 @@
     .intel_syntax
     .section .note.GNU-stack,"",@progbits
 
+
     .text
     .global aio_context_switch
 aio_context_switch:
+    // exchange all general-purpose registers
     xchg    rsp, [rdi+8]
     xchg    rbp, [rdi+16]
     xchg    rbx, [rdi+24]
     xchg    r12, [rdi+32]
     xchg    r13, [rdi+40]
     xchg    r14, [rdi+48]
-    xchg    r15, [rdi+56]                               // exchange all general-purpose registers
+    xchg    r15, [rdi+56]
 
-    mov     r11, [rdi]                                  // load context rip into temporary
+    // load context rip into temporary
+    mov     r11, [rdi]
 
+    // set context rip to continuation point
     lea     r10, [rip+restore]
-    mov     [rdi], r10                                  // set context rip to continuation point
+    mov     [rdi], r10
 
-    jmp     r11                                         // jump into context rip
+    // jump into context rip
+    jmp     r11
 restore:
     ret
+
 
     .text
     .global aio_context_trampoline
 aio_context_trampoline:
     push    rbp
 
+    // call context entrypoint
     call    rbx
-    mov     rdi, r12                                    // try to restore context
+
+    // return to parent context
+    mov     rdi, rax
     call    aio_context_switch
 
-    pop     rbp                                         // unreachable
-    ret
+    // abort on dead context
+    call    aio_context_trap
 
 #endif

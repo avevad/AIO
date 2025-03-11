@@ -8,13 +8,17 @@
 namespace AIO {
 
     struct context_t;
+    using context_entrypoint_t = context_t &();
 
-    context_t make_context(void (*entrypoint)(), void *stack, std::size_t stack_size);
+    context_t make_context(context_entrypoint_t *entrypoint, void *stack, std::size_t stack_size);
     void switch_to_context(context_t &ctx);
 
 #ifdef AIO_SYSTEM_V_AMD64_ABI
 
     namespace _sysv_amd64 {
+
+        extern "C" [[noreturn]] void aio_context_trampoline();
+        extern "C" [[noreturn]] void aio_context_trap();
 
         extern "C" struct aio_context_t {
         private:
@@ -28,7 +32,7 @@ namespace AIO {
             };
 
         public:
-            R64 rip;
+            R64 rip = {.q_word = 0};
 
             R64 rsp;
             R64 rbp;
@@ -42,14 +46,12 @@ namespace AIO {
         };
         static_assert(sizeof(aio_context_t) == 64);
 
-        extern "C" void aio_context_trampoline();
-        extern "C" void aio_context_create(aio_context_t *ctx, void *stack, std::size_t stack_size, void (*entrypoint)());
         extern "C" void aio_context_switch(aio_context_t *ctx);
 
     }
 
     struct context_t {
-        _sysv_amd64::aio_context_t _abi_ctx;
+        _sysv_amd64::aio_context_t _abi_ctx {};
     };
 
 #else

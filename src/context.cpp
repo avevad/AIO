@@ -1,10 +1,12 @@
 #include "context.hpp"
 
+#include <util.hpp>
+
 namespace AIO {
 
 #ifdef AIO_SYSTEM_V_AMD64_ABI
 
-    context_t make_context(void (*entrypoint)(), void *stack, std::size_t stack_size) {
+    context_t make_context(context_entrypoint_t *entrypoint, void *stack, std::size_t stack_size) {
         // calculate stack bottom and align by 16 bytes
         auto *stack_bytes = static_cast<char *>(stack);
         auto stack_bottom = reinterpret_cast<uintptr_t>(stack_bytes + stack_size);
@@ -25,6 +27,10 @@ namespace AIO {
 
     void switch_to_context(context_t &ctx) {
         aio_context_switch(&ctx._abi_ctx);
+    }
+
+    void _sysv_amd64::aio_context_trap() {
+        assertion_failed("attempt to switch into dead context");
     }
 
 

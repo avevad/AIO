@@ -12,11 +12,11 @@ void sample_contexts() {
 
     const auto stack = std::make_unique<char[]>(STACK_SIZE_BYTES);
 
-    auto subcontext_entrypoint = []() -> void {
+    auto subcontext_entrypoint = []() -> AIO::context_t & {
         std::cout << "Hello from subcontext" << std::endl;
         switch_to_context(context);
         std::cout << "Subcontext will exit now" << std::endl;
-        AIO::switch_to_context(context);
+        return context;
     };
 
     context = AIO::make_context(subcontext_entrypoint, stack.get(), STACK_SIZE_BYTES);

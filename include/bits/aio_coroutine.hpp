@@ -70,7 +70,7 @@ namespace AIO {
         private:
             using SignatureT = MetaActualSignatureT<Ret, Arg>;
 
-            [[noreturn]] static void entrypoint() noexcept;
+            [[noreturn]] static context_t &entrypoint() noexcept;
 
             void yield_error_impl();
 
