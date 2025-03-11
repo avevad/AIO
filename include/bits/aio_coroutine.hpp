@@ -46,7 +46,7 @@ namespace AIO {
         class CoroutineBase {
         public:
             template<typename Functor, typename FunctorDecay = std::decay_t<Functor>>
-                requires(!std::is_same_v<FunctorDecay, CoroutineBase>)
+                requires(!std::is_same_v<FunctorDecay, CoroutineBase<Ret, Arg, Derived>>)
             /* implicit */ CoroutineBase(Functor &&fun); // NOLINT(*-explicit-constructor)
 
             CoroutineBase(const CoroutineBase &) = delete;
@@ -77,17 +77,15 @@ namespace AIO {
         protected:
             enum class State : uint8_t { RUN = 0, FINISH = 1, ERROR = 2 };
 
-            std::unique_ptr<char[]> prepare_stack();
-
             void check_rethrow();
 
             void check_kill();
 
-            aio_context ctx{};
-            State state = State::RUN;
-
             std::move_only_function<SignatureT> fun;
             std::unique_ptr<char[]> stack;
+
+            context_t ctx{};
+            State state = State::RUN;
         };
 
     } // namespace _impl

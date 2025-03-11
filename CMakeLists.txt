@@ -9,16 +9,18 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Werror")
 
 # Shared library
 add_library(aio-static STATIC
-        src/context.S
         src/util.cpp
+        src/context.S
+        src/context.cpp
 )
 target_include_directories(aio-static PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(aio-static PROPERTIES OUTPUT_NAME aio)
 
 # Static library
 add_library(aio-shared SHARED
-        src/context.S
         src/util.cpp
+        src/context.S
+        src/context.cpp
 )
 target_include_directories(aio-shared PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(aio-shared PROPERTIES OUTPUT_NAME aio)

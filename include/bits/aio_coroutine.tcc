@@ -16,7 +16,8 @@ namespace AIO::_impl {
     template<typename Functor, typename FunctorDecay>
         requires(!std::is_same_v<FunctorDecay, CoroutineBase<Ret, Arg, Derived>>)
     CoroutineBase<Ret, Arg, Derived>::CoroutineBase(Functor &&fun)
-        : fun(std::forward<Functor>(fun)), stack(prepare_stack()) {
+        : fun(std::forward<Functor>(fun)), stack(std::make_unique<char[]>(COROUTINE_STACK_SIZE)),
+          ctx(make_context(entrypoint, stack.get(), COROUTINE_STACK_SIZE)) {
     }
 
     template<typename Ret, typename Arg, typename Derived>
@@ -55,7 +56,7 @@ namespace AIO::_impl {
 
         void *prev_coroutine = current_coroutine;
         current_coroutine = this;
-        aio_context_switch(&ctx);
+        switch_to_context(ctx);
         current_coroutine = prev_coroutine;
 
         try {
@@ -86,16 +87,7 @@ namespace AIO::_impl {
     void CoroutineBase<Ret, Arg, Derived>::yield_error_impl() {
         state = State::ERROR;
 
-        aio_context_switch(&ctx);
-    }
-
-    template<typename Ret, typename Arg, typename Derived>
-    std::unique_ptr<char[]> CoroutineBase<Ret, Arg, Derived>::prepare_stack() {
-        auto stack = std::make_unique<char[]>(COROUTINE_STACK_SIZE);
-
-        aio_context_create(&ctx, stack.get(), COROUTINE_STACK_SIZE, entrypoint);
-
-        return stack;
+        switch_to_context(ctx);
     }
 
     template<typename Ret, typename Arg, typename Derived>
@@ -123,7 +115,7 @@ namespace AIO {
 
         void *prev_coroutine = _impl::current_coroutine;
         _impl::current_coroutine = this;
-        aio_context_switch(&(Base::ctx));
+        switch_to_context(Base::ctx);
         _impl::current_coroutine = prev_coroutine;
 
         Base::check_rethrow();
@@ -139,7 +131,7 @@ namespace AIO {
 
         this->ret = &ret;
 
-        aio_context_switch(&(Base::ctx));
+        switch_to_context(Base::ctx);
 
         Base::check_kill();
 
@@ -159,7 +151,7 @@ namespace AIO {
 
         void *prev_coroutine = _impl::current_coroutine;
         _impl::current_coroutine = this;
-        aio_context_switch(&(Base::ctx));
+        switch_to_context(Base::ctx);
         _impl::current_coroutine = prev_coroutine;
 
         Base::check_rethrow();
@@ -170,7 +162,7 @@ namespace AIO {
         if (finish)
             Base::state = Base::State::FINISH;
 
-        aio_context_switch(&(Base::ctx));
+        switch_to_context(Base::ctx);
 
         Base::check_kill();
 
@@ -188,7 +180,7 @@ namespace AIO {
     Ret Coroutine<Ret()>::resume_impl() {
         void *prev_coroutine = _impl::current_coroutine;
         _impl::current_coroutine = this;
-        aio_context_switch(&(Base::ctx));
+        switch_to_context(Base::ctx);
         _impl::current_coroutine = prev_coroutine;
 
         Base::check_rethrow();
@@ -204,7 +196,7 @@ namespace AIO {
 
         this->ret = &ret;
 
-        aio_context_switch(&(Base::ctx));
+        switch_to_context(Base::ctx);
 
         Base::check_kill();
     }
@@ -218,7 +210,7 @@ namespace AIO {
     inline void Coroutine<void()>::resume_impl() {
         void *prev_coroutine = _impl::current_coroutine;
         _impl::current_coroutine = this;
-        aio_context_switch(&ctx);
+        switch_to_context(ctx);
         _impl::current_coroutine = prev_coroutine;
 
         check_rethrow();
@@ -228,7 +220,7 @@ namespace AIO {
         if (finish)
             state = State::FINISH;
 
-        aio_context_switch(&ctx);
+        switch_to_context(ctx);
 
         check_kill();
     }
