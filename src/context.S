@@ -2,7 +2,7 @@
 
 #ifdef AIO_SYSTEM_V_AMD64_ABI
 
-    .intel_syntax
+    .intel_syntax noprefix
     .section .note.GNU-stack,"",@progbits
 
 
