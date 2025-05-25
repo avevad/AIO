@@ -1,5 +1,7 @@
 #pragma once
 #include <queue>
+#include <variant>
+#include <utility>
 
 namespace AIO {
     class SimpleEventLoop;
