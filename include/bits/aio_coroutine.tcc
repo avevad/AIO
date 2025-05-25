@@ -143,6 +143,7 @@ namespace AIO {
     template<typename Ret, typename Arg>
     void Coroutine<Ret(Arg)>::entrypoint() {
         auto *self = static_cast<Coroutine *>(_impl::current_coroutine);
+        self->check_kill();
         self->yield_impl(self->fun(*self->arg), true);
     }
 
@@ -174,6 +175,7 @@ namespace AIO {
     template<typename Arg>
     void Coroutine<void(Arg)>::entrypoint() {
         auto *self = static_cast<Coroutine *>(_impl::current_coroutine);
+        self->check_kill();
         self->fun(*self->arg);
         self->yield_impl(true);
     }
@@ -206,6 +208,7 @@ namespace AIO {
     template<typename Ret>
     void Coroutine<Ret()>::entrypoint() {
         auto *self = static_cast<Coroutine *>(_impl::current_coroutine);
+        self->check_kill();
         self->yield_impl(self->fun(), true);
     }
 
@@ -229,6 +232,7 @@ namespace AIO {
 
     inline void Coroutine<void()>::entrypoint() {
         auto *self = static_cast<Coroutine *>(_impl::current_coroutine);
+        self->check_kill();
         self->fun();
         self->yield_impl(true);
     }
