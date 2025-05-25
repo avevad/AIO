@@ -1,5 +1,6 @@
 #include "context.hpp"
 #include "coroutine.hpp"
+#include "event_loop.hpp"
 
 #include <iostream>
 #include <memory>
@@ -68,7 +69,34 @@ void sample_coroutines() {
     std::cout << std::endl;
 }
 
+void sample_event_loop() {
+    std::cout << "----------Event loop----------" << std::endl;
+
+    AIO::run([](auto &loop) -> void {
+        auto calculate = loop.async([] -> int {
+            std::cout << "Calculating the number..." << std::endl;
+            return 42;
+        });
+
+        auto print_hello = loop.async([] -> std::monostate {
+            std::cout << "Hello from asynchronous task!" << std::endl;
+            return {};
+        });
+
+        std::cout << "Beginning of main" << std::endl;
+        print_hello().drop();
+
+        std::cout << "Starting calculation..." << std::endl;
+        auto future = calculate();
+        std::cout << "Started calculate() function" << std::endl;
+
+        auto result = loop.await(std::move(future));
+        std::cout << "Result: " << result << std::endl;
+    });
+}
+
 int main() {
     sample_contexts();
     sample_coroutines();
+    sample_event_loop();
 }

@@ -53,7 +53,7 @@ namespace AIO {
             CoroutineBase(CoroutineBase &&other) = delete;
 
             CoroutineBase &operator=(const CoroutineBase &) = delete;
-            CoroutineBase &operator=(CoroutineBase &&) = delete;
+            CoroutineBase &operator=(CoroutineBase &&other) = delete;
 
             template<typename... ResumeArgs>
             Ret resume(ResumeArgs &&...arg);
@@ -201,8 +201,8 @@ namespace AIO {
         CoroutineIterator(const CoroutineIterator &other);
         CoroutineIterator &operator=(const CoroutineIterator &other);
 
-        CoroutineIterator(CoroutineIterator &&) = delete;
-        CoroutineIterator &operator=(CoroutineIterator &&) = delete;
+        CoroutineIterator(CoroutineIterator &&) = default;
+        CoroutineIterator &operator=(CoroutineIterator &&) = default;
 
         Ret &operator*() const;
         Ret *operator->() const;
