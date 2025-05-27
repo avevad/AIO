@@ -80,9 +80,8 @@ void sample_event_loop() {
             return 42;
         });
 
-        auto print_hello = loop.async([] -> std::monostate {
+        auto print_hello = loop.async([] -> void {
             std::cout << "Hello from asynchronous task!" << std::endl;
-            return {};
         });
 
         std::cout << "Beginning of main" << std::endl;

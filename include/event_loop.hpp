@@ -3,6 +3,8 @@
 #include <variant>
 #include <utility>
 
+#include "util.hpp"
+
 namespace AIO {
     class SimpleEventLoop;
 
@@ -13,94 +15,208 @@ namespace AIO {
     class Promise;
 
     template<FutureResult Res>
-    class Future : public Bound<Future<Res>, Promise<Res>> {
-    public:
-        Future() = default;
-        Future(Future &&other) = default;
-        Future& operator=(Future &&other) noexcept = default;
+    class Future;
 
-        void drop() && {
-            BoundBase::unbind();
-        }
+    namespace _impl {
+        template<FutureResult Res>
+        struct MetaConsumerSignature {
+            using Type = void(Res);
+        };
 
-        ~Future();
+        template<>
+        struct MetaConsumerSignature<void> {
+            using Type = void();
+        };
 
-    private:
-        using BoundBase = Bound<Future, Promise<Res>>;
-        using Consumer = std::move_only_function<void(Res)>;
+        template<FutureResult Res>
+        using MetaConsumerSignatureT = typename MetaConsumerSignature<Res>::Type;
 
-        friend Promise<Res>;
-        friend SimpleEventLoop;
+        template<FutureResult Res>
+        using MetaFutureResultSubstituteT = std::conditional_t<std::is_void_v<Res>, std::monostate, Res>;
 
-        template<typename AcceptRes>
-        void accept(AcceptRes &&res) {
-            if (consumer.has_value()) {
-                consumer.value()(std::forward<AcceptRes>(res));
-            } else {
-                result = std::forward<AcceptRes>(res);
+        template<FutureResult Res, typename Derived>
+        class FutureBase : public Bound<Derived, Promise<Res>> {
+        public:
+            FutureBase() = default;
+            FutureBase(FutureBase &&other) = default;
+            FutureBase &operator=(FutureBase &&other) noexcept = default;
+
+            void drop() && {
+                BoundBase::unbind();
             }
-        }
 
-        void set_consumer(auto &&fun) {
-            if (consumer.has_value()) {
-                assertion_failed("attempt to reset consumer");
+            ~FutureBase();
+
+        private:
+            using BoundBase = Bound<Derived, Promise<Res>>;
+            using Consumer = std::move_only_function<MetaConsumerSignatureT<Res>>;
+            using ResultSubstitute = MetaFutureResultSubstituteT<Res>;
+
+            friend Promise<Res>;
+            friend SimpleEventLoop;
+            friend Derived;
+
+            template<typename ...AcceptRes>
+            void accept(AcceptRes &&...res) {
+                static_cast<Derived *>(this)->accept_impl(std::forward<AcceptRes>(res)...);
             }
-            consumer.emplace(fun);
-            if (result.has_value()) {
-                consumer.value()(std::move(result.value()));
-                result.reset();
+
+            void set_consumer(auto &&fun) {
+                static_cast<Derived *>(this)->set_consumer_impl(std::forward<decltype(fun)>(fun));
             }
-        }
 
-        std::optional<Consumer> consumer = std::nullopt;
-        std::optional<Res> result = std::nullopt;
-    };
+            std::optional<Consumer> consumer = std::nullopt;
+            std::optional<ResultSubstitute> result = std::nullopt;
+        };
 
-    template<FutureResult Res>
-    class Promise : public Bound<Promise<Res>, Future<Res>> {
-    public:
-        Promise() = default;
-
-        Promise(Promise &&other) = default;
-        Promise& operator=(Promise &&other) noexcept = default;
-
-        template<typename FulfillRes>
-        void fulfill(FulfillRes &&res) {
-            if (fulfilled) {
-                assertion_failed("attempt to fulfill already fulfilled promise");
-            }
-            if (auto *future_ptr = BoundBase::get_bound_ptr()) {
-                future_ptr->accept(std::forward<FulfillRes>(res));
-            }
-            fulfilled = true;
-        }
-
-        ~Promise() {
+        template<FutureResult Res, typename Derived>
+        FutureBase<Res, Derived>::~FutureBase() {
             if (!BoundBase::is_bound()) {
                 return;
             }
-            if (BoundBase::get_bound_ptr() && !fulfilled) {
-                assertion_failed("destroying non-fulfilled promise");
+            if ((BoundBase::get_bound_ptr() && !BoundBase::get_bound_obj().fulfilled) || result.has_value()) {
+                assertion_failed("destroying non-awaited future");
             }
         }
 
+        template<FutureResult Res, typename Derived>
+        class PromiseBase : public Bound<Derived, Future<Res>> {
+        public:
+            PromiseBase() = default;
+
+            PromiseBase(PromiseBase &&other) = default;
+            PromiseBase& operator=(PromiseBase &&other) noexcept = default;
+
+            template<typename ...FulfillRes>
+            void fulfill(FulfillRes &&...res) {
+                static_cast<Derived *>(this)->fulfill_impl(std::forward<FulfillRes>(res)...);
+            }
+
+            ~PromiseBase() {
+                if (!BoundBase::is_bound()) {
+                    return;
+                }
+                if (BoundBase::get_bound_ptr() && !fulfilled) {
+                    assertion_failed("destroying non-fulfilled promise");
+                }
+            }
+
+        private:
+            using BoundBase = Bound<Derived, Future<Res>>;
+
+            friend Future<Res>;
+            friend FutureBase<Res, Future<Res>>;
+            friend Derived;
+
+            bool fulfilled = false;
+        };
+
+    }
+
+    template<FutureResult Res>
+    class Future : public _impl::FutureBase<Res, Future<Res>> {
+        using Base = _impl::FutureBase<Res, Future>;
+
+    public:
+        using Base::Base;
+
     private:
-        using BoundBase = Bound<Promise, Future<Res>>;
+        friend Base;
 
-        friend Future<Res>;
+        template<typename AcceptRes>
+        void accept_impl(AcceptRes &&res) {
+            if (Base::consumer.has_value()) {
+                Base::consumer.value()(std::forward<AcceptRes>(res));
+            } else {
+                Base::result = std::forward<AcceptRes>(res);
+            }
+        }
 
-        bool fulfilled = false;
+        void set_consumer_impl(auto &&fun) {
+            if (Base::consumer.has_value()) {
+                assertion_failed("attempt to reset consumer");
+            }
+            Base::consumer.emplace(fun);
+            if (Base::result.has_value()) {
+                Base::consumer.value()(std::move(Base::result.value()));
+                Base::result.reset();
+            }
+        }
+    };
+
+    template<>
+    class Future<void> : public _impl::FutureBase<void, Future<void>> {
+        using Base = _impl::FutureBase<void, Future>;
+
+    public:
+        using Base::Base;
+
+    private:
+        friend Base;
+
+        void accept_impl() {
+            if (Base::consumer.has_value()) {
+                Base::consumer.value()();
+            } else {
+                Base::result = std::monostate {};
+            }
+        }
+
+        void set_consumer_impl(auto &&fun) {
+            if (Base::consumer.has_value()) {
+                assertion_failed("attempt to reset consumer");
+            }
+            Base::consumer.emplace(fun);
+            if (Base::result.has_value()) {
+                Base::consumer.value()();
+                Base::result.reset();
+            }
+        }
     };
 
     template<FutureResult Res>
-    Future<Res>::~Future() {
-        if (!BoundBase::is_bound()) {
-            return;
+    class Promise : public _impl::PromiseBase<Res, Promise<Res>> {
+        using Base = _impl::PromiseBase<Res, Promise>;
+
+    public:
+        using Base::Base;
+
+    private:
+        friend Base;
+
+        template<typename FulfillRes>
+        void fulfill_impl(FulfillRes &&res) {
+            if (Base::fulfilled) {
+                assertion_failed("attempt to fulfill already fulfilled promise");
+            }
+            if (auto *future_ptr = Base::BoundBase::get_bound_ptr()) {
+                future_ptr->accept(std::forward<FulfillRes>(res));
+            }
+            Base::fulfilled = true;
         }
-        if ((BoundBase::get_bound_ptr() && !BoundBase::get_bound_obj().fulfilled) || result.has_value()) {
-            assertion_failed("destroying non-awaited future");
+    };
+
+    template<>
+    class Promise<void> : public _impl::PromiseBase<void, Promise<void>> {
+        using Base = _impl::PromiseBase<void, Promise>;
+
+    public:
+        using Base::Base;
+
+    private:
+        friend Base;
+
+        void fulfill_impl() {
+            if (Base::fulfilled) {
+                assertion_failed("attempt to fulfill already fulfilled promise");
+            }
+            if (auto *future_ptr = Base::BoundBase::get_bound_ptr()) {
+                future_ptr->accept();
+            }
+            Base::fulfilled = true;
         }
-    }
+    };
+
 
     class SimpleEventLoop {
     public:
@@ -118,14 +234,19 @@ namespace AIO {
 
             Future<Res> future;
             Promise<Res> promise;
-            bind(future, promise);
+            AIO::bind(future, promise);
 
             auto job = [
                 fun = std::forward<Functor>(fun),
                 args = std::tuple<Args...>(std::forward<Args>(args)...),
                 promise = std::move(promise)
             ] mutable {
-                promise.fulfill(std::apply(fun, args));
+                if constexpr (!std::is_void_v<Res>) {
+                    promise.fulfill(std::apply(fun, args));
+                } else {
+                    std::apply(fun, args);
+                    promise.fulfill();
+                }
             };
             auto coro = std::make_shared<CoroutineHolder>(std::move(job));
 
@@ -150,20 +271,30 @@ namespace AIO {
                 assertion_failed("attempt to await() outside of event loop");
             }
 
-            std::optional<Res> result = std::nullopt;
-
             auto task = [this, coro = current_coro.value()] mutable {
                 do_coroutine_step(std::move(coro));
             };
-            auto consumer = [this, task = std::move(task), &result] (Res &&res) mutable {
-                result = std::move(res);
-                pending_tasks.push(std::move(task));
-            };
-            future.set_consumer(consumer);
+            if constexpr (!std::is_void_v<Res>) {
+                std::optional<Res> result = std::nullopt;
+                auto consumer = [this, task = std::move(task), &result] (Res &&res) mutable {
+                    result = std::move(res);
+                    pending_tasks.push(std::move(task));
+                };
+                future.set_consumer(consumer);
 
-            current_coro.value()->wrapped.yield();
+                current_coro.value()->wrapped.yield();
 
-            return std::move(result.value());
+                return std::move(result.value());
+            } else {
+                auto consumer = [this, task = std::move(task)] () mutable {
+                    pending_tasks.push(std::move(task));
+                };
+                future.set_consumer(consumer);
+
+                current_coro.value()->wrapped.yield();
+
+                return;
+            }
         }
 
         void run();
@@ -208,7 +339,7 @@ namespace AIO {
         }
     }
 
-    void run(const std::function<void(SimpleEventLoop &)> &main_function) {
+    inline void run(const std::function<void(SimpleEventLoop &)> &main_function) {
         SimpleEventLoop loop;
         loop.async_execute([&loop, &main_function] () -> std::monostate {
             main_function(loop);
