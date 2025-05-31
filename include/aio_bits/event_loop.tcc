@@ -2,6 +2,9 @@
 
 #include "event_loop.hpp"
 
+#include <bits/std_thread.h>
+#include <bits/this_thread_sleep.h>
+
 namespace AIO {
 
     template<typename Functor, typename... Args>
@@ -63,9 +66,24 @@ namespace AIO {
             return;
         }
     }
+    template<typename Rep, typename Period>
+    Future<void> SimpleEventLoop::sleep_for(const std::chrono::duration<Rep, Period> &duration) {
+        return sleep_until(
+        std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<
+                std::chrono::steady_clock::duration,
+                std::chrono::steady_clock::rep,
+                std::chrono::steady_clock::period
+            >(duration)
+        );
+    }
 
     template<typename Functor>
     SimpleEventLoop::CoroutineHolder::CoroutineHolder(Functor fun) : wrapped(std::move(fun)) {
+    }
+
+    inline bool SimpleEventLoop::TimedTask::operator<(const TimedTask &task1) const {
+        return when < task1.when;
     }
 
     inline void SimpleEventLoop::do_coroutine_step(std::shared_ptr<CoroutineHolder> coro) {
@@ -87,16 +105,38 @@ namespace AIO {
         loop.run();
     }
 
-    inline void SimpleEventLoop::run() {
-        while (!pending_tasks.empty()) {
-            Task task = std::move(pending_tasks.front());
-            pending_tasks.pop();
+    inline Future<void> SimpleEventLoop::sleep_until(const std::chrono::time_point<std::chrono::steady_clock> &time) {
+        Future<void> future;
+        Promise<void> promise;
+        AIO::bind(future, promise);
 
-            try {
-                task();
-            } catch (...) {
-                assertion_failed("exception in event loop task");
+        auto task = [promise = std::move(promise)] mutable { promise.fulfill(); };
+        pending_timed_tasks.emplace(time, std::move(task));
+
+        return future;
+    }
+
+    inline void SimpleEventLoop::run() {
+        try {
+            while (true) {
+                if (!pending_tasks.empty()) {
+                    Task task = std::move(pending_tasks.front());
+                    pending_tasks.pop();
+                    task();
+                    continue;
+                }
+
+                if (!pending_timed_tasks.empty()) {
+                    TimedTask task = std::move(pending_timed_tasks.extract(pending_timed_tasks.begin()).value());
+                    std::this_thread::sleep_until(task.when);
+                    task.what();
+                    continue;
+                }
+
+                break;
             }
+        } catch (...) {
+            assertion_failed("exception in event loop");
         }
     }
 

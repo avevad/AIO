@@ -1,10 +1,13 @@
 #pragma once
-#include <queue>
-#include <variant>
-#include <utility>
 
-#include "util.hpp"
 #include "future.hpp"
+#include "util.hpp"
+
+#include <chrono>
+#include <queue>
+#include <set>
+#include <utility>
+#include <variant>
 
 namespace AIO {
     class SimpleEventLoop {
@@ -26,6 +29,11 @@ namespace AIO {
         template<typename Res>
         Res await(Future<Res> future);
 
+        template<typename Rep, typename Period>
+        Future<void> sleep_for(const std::chrono::duration<Rep, Period> &duration);
+
+        Future<void> sleep_until(const std::chrono::time_point<std::chrono::steady_clock> &time);
+
         void run();
 
     private:
@@ -38,12 +46,20 @@ namespace AIO {
 
         using Task = std::move_only_function<void()>;
 
+        struct TimedTask {
+            std::chrono::time_point<std::chrono::steady_clock> when;
+            Task what;
+
+            bool operator<(const TimedTask &task1) const;
+        };
+
         template<FutureResult Res>
         friend class Future;
 
         void do_coroutine_step(std::shared_ptr<CoroutineHolder> coro);
 
         std::queue<Task> pending_tasks = {};
+        std::multiset<TimedTask> pending_timed_tasks = {};
         std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
     };
 

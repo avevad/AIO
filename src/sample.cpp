@@ -72,11 +72,13 @@ void sample_coroutines() {
 }
 
 void sample_event_loop() {
+    using namespace std::chrono_literals;
     std::cout << "----------Event loop----------" << std::endl;
 
-    AIO::run([](auto &loop) -> void {
-        auto calculate = loop.async([] -> int {
+    AIO::run([](AIO::SimpleEventLoop &loop) -> void {
+        auto calculate = loop.async([&loop] -> int {
             std::cout << "Calculating the number..." << std::endl;
+            loop.await(loop.sleep_for(1s));
             return 42;
         });
 
