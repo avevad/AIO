@@ -78,7 +78,7 @@ void sample_event_loop() {
     AIO::run([](AIO::SimpleEventLoop &loop) -> void {
         auto calculate = loop.async([&loop] -> int {
             std::cout << "Calculating the number..." << std::endl;
-            loop.await(loop.sleep_for(1s));
+            loop.await(loop.timeout(1s));
             return 42;
         });
 
@@ -95,6 +95,8 @@ void sample_event_loop() {
 
         auto result = loop.await(std::move(future));
         std::cout << "Result: " << result << std::endl;
+
+        loop.await(loop.event({.sys_fd = STDIN_FILENO, .types = AIO::IOEvent::IN}));
     });
 }
 

@@ -67,8 +67,8 @@ namespace AIO {
         }
     }
     template<typename Rep, typename Period>
-    Future<void> SimpleEventLoop::sleep_for(const std::chrono::duration<Rep, Period> &duration) {
-        return sleep_until(
+    Future<void> SimpleEventLoop::timeout(const std::chrono::duration<Rep, Period> &duration) {
+        return deadline(
         std::chrono::steady_clock::now() +
             std::chrono::duration_cast<
                 std::chrono::steady_clock::duration,
@@ -105,7 +105,7 @@ namespace AIO {
         loop.run();
     }
 
-    inline Future<void> SimpleEventLoop::sleep_until(const std::chrono::time_point<std::chrono::steady_clock> &time) {
+    inline Future<void> SimpleEventLoop::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
         Future<void> future;
         Promise<void> promise;
         AIO::bind(future, promise);
@@ -116,6 +116,36 @@ namespace AIO {
         return future;
     }
 
+    inline Future<IOEvent::Types> SimpleEventLoop::event(IOEvent event) {
+        Future<IOEvent::Types> future;
+        Promise<IOEvent::Types> promise;
+        AIO::bind(future, promise);
+
+        pending_io_tasks.push_back({
+            .iter = pending_io_tasks.end() /* stub */,
+            .event = event,
+            .callback = [] (auto) {} /* stub */
+        });
+        auto iter = --pending_io_tasks.end();
+        auto *pending_task = &*iter;
+
+        IOEvent::Callback callback = [
+            this, promise = std::move(promise), pending_task
+        ] (IOEvent::Types event_types) mutable {
+            promise.fulfill(event_types);
+            io_queue.deregister_event(pending_task->event.sys_fd);
+            pending_io_tasks.erase(pending_task->iter);
+        };
+
+        pending_task->iter = iter;
+        pending_task->callback = std::move(callback);
+
+        io_queue.register_event(event, &pending_task->callback, true);
+
+        return future;
+
+    }
+
     inline void SimpleEventLoop::run() {
         try {
             while (true) {
@@ -123,6 +153,15 @@ namespace AIO {
                     Task task = std::move(pending_tasks.front());
                     pending_tasks.pop();
                     task();
+                    continue;
+                }
+
+                if (!pending_io_tasks.empty()) {
+                    std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline = std::nullopt;
+                    if (!pending_timed_tasks.empty()) {
+                        deadline = pending_timed_tasks.begin()->when;
+                    }
+                    io_queue.poll_event(deadline);
                     continue;
                 }
 

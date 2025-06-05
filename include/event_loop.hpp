@@ -2,8 +2,10 @@
 
 #include "future.hpp"
 #include "util.hpp"
+#include "io.hpp"
 
 #include <chrono>
+#include <list>
 #include <queue>
 #include <set>
 #include <utility>
@@ -30,9 +32,11 @@ namespace AIO {
         Res await(Future<Res> future);
 
         template<typename Rep, typename Period>
-        Future<void> sleep_for(const std::chrono::duration<Rep, Period> &duration);
+        Future<void> timeout(const std::chrono::duration<Rep, Period> &duration);
 
-        Future<void> sleep_until(const std::chrono::time_point<std::chrono::steady_clock> &time);
+        Future<void> deadline(const std::chrono::time_point<std::chrono::steady_clock> &time);
+
+        Future<IOEvent::Types> event(IOEvent event);
 
         void run();
 
@@ -53,6 +57,12 @@ namespace AIO {
             bool operator<(const TimedTask &task1) const;
         };
 
+        struct IOTask {
+            std::list<IOTask>::iterator iter;
+            IOEvent event;
+            IOEvent::Callback callback;
+        };
+
         template<FutureResult Res>
         friend class Future;
 
@@ -60,7 +70,10 @@ namespace AIO {
 
         std::queue<Task> pending_tasks = {};
         std::multiset<TimedTask> pending_timed_tasks = {};
+        std::list<IOTask> pending_io_tasks = {};
+
         std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
+        IOQueue io_queue;
     };
 
     void run(const std::function<void(SimpleEventLoop &)> &main_function);
