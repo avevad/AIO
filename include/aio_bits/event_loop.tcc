@@ -69,13 +69,10 @@ namespace AIO {
     template<typename Rep, typename Period>
     Future<void> SimpleEventLoop::timeout(const std::chrono::duration<Rep, Period> &duration) {
         return deadline(
-        std::chrono::steady_clock::now() +
+            std::chrono::steady_clock::now() +
             std::chrono::duration_cast<
-                std::chrono::steady_clock::duration,
-                std::chrono::steady_clock::rep,
-                std::chrono::steady_clock::period
-            >(duration)
-        );
+                std::chrono::steady_clock::duration, std::chrono::steady_clock::rep, std::chrono::steady_clock::period>(
+                duration));
     }
 
     template<typename Functor>
@@ -105,6 +102,11 @@ namespace AIO {
         loop.run();
     }
 
+    inline SimpleEventLoop::SimpleEventLoop()
+        : std_in(StreamFD::steal_system(this, 0)), std_out(StreamFD::steal_system(this, 1)),
+          std_err(StreamFD::steal_system(this, 2)) {
+    }
+
     inline Future<void> SimpleEventLoop::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
         Future<void> future;
         Promise<void> promise;
@@ -122,16 +124,13 @@ namespace AIO {
         AIO::bind(future, promise);
 
         pending_io_tasks.push_back({
-            .iter = pending_io_tasks.end() /* stub */,
-            .event = event,
-            .callback = [] (auto) {} /* stub */
+            .iter = pending_io_tasks.end() /* stub */, .event = event, .callback = [](auto) {} /* stub */
         });
         auto iter = --pending_io_tasks.end();
         auto *pending_task = &*iter;
 
-        IOEvent::Callback callback = [
-            this, promise = std::move(promise), pending_task
-        ] (IOEvent::Types event_types) mutable {
+        IOEvent::Callback callback = [this, promise = std::move(promise),
+                                      pending_task](IOEvent::Types event_types) mutable {
             promise.fulfill(event_types);
             io_queue.deregister_event(pending_task->event.sys_fd);
             pending_io_tasks.erase(pending_task->iter);
@@ -143,7 +142,6 @@ namespace AIO {
         io_queue.register_event(event, &pending_task->callback, true);
 
         return future;
-
     }
 
     inline void SimpleEventLoop::run() {

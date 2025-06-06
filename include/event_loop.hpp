@@ -12,9 +12,10 @@
 #include <variant>
 
 namespace AIO {
+
     class SimpleEventLoop {
     public:
-        SimpleEventLoop() = default;
+        SimpleEventLoop();
 
         SimpleEventLoop(const SimpleEventLoop &) = delete;
         SimpleEventLoop(SimpleEventLoop &&other) = delete;
@@ -74,9 +75,12 @@ namespace AIO {
 
         std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
         IOQueue io_queue;
+
+        const StreamFD std_in, std_out, std_err;
     };
 
     void run(const std::function<void(SimpleEventLoop &)> &main_function);
+
 } // namespace AIO
 
 #include "aio_bits/event_loop.tcc"

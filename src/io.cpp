@@ -1,18 +1,20 @@
-#pragma once
-
 #include "io.hpp"
 #include "util.hpp"
 
+#include <cstring>
+#include <sys/epoll.h>
+#include <unistd.h>
+
 namespace AIO {
 
-    inline IOQueue::IOQueue() {
+    IOQueue::IOQueue() {
         epfd = epoll_create1(EPOLL_CLOEXEC);
         if (epfd < 0) {
             assertion_failed(strerror(errno));
         }
     }
 
-    inline void IOQueue::register_event(IOEvent event, IOEvent::Callback *callback, bool oneshot) {
+    void IOQueue::register_event(IOEvent event, IOEvent::Callback *callback, bool oneshot) {
         epoll_event epe{.events = 0, .data = {.ptr = callback}};
         if (event.types & IOEvent::IN) {
             epe.events |= EPOLLIN;
@@ -28,11 +30,11 @@ namespace AIO {
         }
     }
 
-    inline void IOQueue::deregister_event(IOEvent::sys_fd_t fd) {
+    void IOQueue::deregister_event(FD::sys_t fd) {
         epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
     }
 
-    inline void IOQueue::poll_event(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline) {
+    void IOQueue::poll_event(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline) {
         epoll_event epe{};
         int timeout_num = -1;
         if (deadline.has_value()) {
@@ -62,7 +64,7 @@ namespace AIO {
         }
     }
 
-    inline IOQueue::~IOQueue() {
+    IOQueue::~IOQueue() {
         close(epfd);
     }
 
