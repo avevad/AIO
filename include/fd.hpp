@@ -4,9 +4,9 @@
 #include <unistd.h>
 #include <filesystem>
 
-class SimpleEventLoop;
-
 namespace AIO {
+
+    class SimpleEventLoop;
 
     class FD {
     public:
