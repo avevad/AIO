@@ -147,6 +147,7 @@ namespace AIO {
     inline void SimpleEventLoop::run() {
         try {
             while (true) {
+                // Check regular tasks that are available unconditionally
                 if (!pending_tasks.empty()) {
                     Task task = std::move(pending_tasks.front());
                     pending_tasks.pop();
@@ -154,6 +155,15 @@ namespace AIO {
                     continue;
                 }
 
+                // Check timed tasks that are already available right now
+                auto now = std::chrono::steady_clock::now();
+                if (!pending_timed_tasks.empty() && pending_timed_tasks.begin()->when <= now) {
+                    TimedTask task = std::move(pending_timed_tasks.extract(pending_timed_tasks.begin()).value());
+                    task.what();
+                    continue;
+                }
+
+                // Check I/O tasks (which would probably block)
                 if (!pending_io_tasks.empty()) {
                     std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline = std::nullopt;
                     if (!pending_timed_tasks.empty()) {
@@ -163,6 +173,7 @@ namespace AIO {
                     continue;
                 }
 
+                // Check timed tasks (which would probably block)
                 if (!pending_timed_tasks.empty()) {
                     TimedTask task = std::move(pending_timed_tasks.extract(pending_timed_tasks.begin()).value());
                     std::this_thread::sleep_until(task.when);

@@ -30,6 +30,15 @@ void sample_contexts() {
     std::cout << "Finishing the subcontext" << std::endl;
     switch_to_context(context);
     std::cout << "Done" << std::endl;
+
+    /*
+     * -----------Contexts-----------
+     * Hello from main
+     * Hello from subcontext
+     * Finishing the subcontext
+     * Subcontext will exit now
+     * Done
+     */
 }
 
 void sample_coroutines() {
@@ -70,6 +79,22 @@ void sample_coroutines() {
         std::cout << e << ' ';
     }
     std::cout << std::endl;
+
+    /*
+     * ----------Coroutines----------
+     * fib[1] = 1
+     * fib[2] = 1
+     * fib[3] = 2
+     * fib[4] = 3
+     * fib[5] = 5
+     * fib[6] = 8
+     * fib[7] = 13
+     * fib[8] = 21
+     * fib[9] = 34
+     * fib[10] = 55
+     * More fibs: 89 144 233 377 610 ...
+     * Until MAX=100000: 987 1597 2584 4181 6765 10946 17711 28657 46368 75025
+     */
 }
 
 void sample_event_loop() {
@@ -84,7 +109,7 @@ void sample_event_loop() {
         });
 
         auto multiply_by_2 = loop.async([&loop] (int x) -> int {
-            std::cout << "Multplying " << x << " by 2..." << std::endl;
+            std::cout << "Multiplying " << x << " by 2..." << std::endl;
             loop.await(loop.timeout(1s));
             return x * 2;
         });
@@ -107,13 +132,34 @@ void sample_event_loop() {
         std::cout.flush();
         // Don't do actual reading - just wait for *some* data -- if STDIN is a terminal,
         // then a whole line would be ready for consequent std::istream read
-        loop.await(loop.std_in.read(0, nullptr));
-        std::cout << "Got it!" << std::endl;
-        std::string name;
-        std::cin >> name;
+        if (loop.await(
+            loop.std_in.read(0, nullptr) |
+            loop.timeout(10s)
+        )) {
+            std::cout << "Got it!" << std::endl;
+            std::string name;
+            std::cin >> name;
 
-        std::cout << "Hello, " << name << "" << std::endl;
+            std::cout << "Hello, " << name << "" << std::endl;
+        } else {
+            std::cout << "(timeout)" << std::endl;
+        }
+
     });
+
+    /*
+     * ----------Event loop----------
+     * Beginning of main
+     * Starting calculation...
+     * Started calculate() function
+     * Hello from some asynchronous task!
+     * Calculating the number...
+     * Hello from some asynchronous task!
+     * Hello from some asynchronous task!
+     * Multiplying 21 by 2...
+     * Result: 42
+     * Enter your name: (timeout)
+     */
 }
 
 int main() {

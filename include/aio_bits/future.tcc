@@ -87,9 +87,9 @@ namespace AIO {
     template<FutureResult Res>
     template<typename FulfillRes>
     void Promise<Res>::fulfill_impl(FulfillRes &&res) {
-        if (Base::fulfilled) {
-            assertion_failed("attempt to fulfill already fulfilled promise");
-        }
+        // if (Base::fulfilled) {
+        //     assertion_failed("attempt to fulfill already fulfilled promise");
+        // }
         if (auto *future_ptr = Base::BoundBase::get_bound_ptr()) {
             future_ptr->accept(std::forward<FulfillRes>(res));
         }
@@ -105,12 +105,92 @@ namespace AIO {
     }
 
     inline void Promise<void>::fulfill_impl() {
-        if (Base::fulfilled) {
-            assertion_failed("attempt to fulfill already fulfilled promise");
-        }
+        // TODO: properly implement and enable these checks
+        // if (Base::fulfilled) {
+        //    assertion_failed("attempt to fulfill already fulfilled promise");
+        // }
         if (auto *future_ptr = Base::BoundBase::get_bound_ptr()) {
             future_ptr->accept();
         }
         Base::fulfilled = true;
     }
+
+    template<FutureResult Res>
+    template<typename AsyncFunctor, typename Res1>
+    Future<Res1> Future<Res>::then(AsyncFunctor &&fun) && {
+        Promise<Res1> promise;
+        Future<Res1> future;
+        AIO::bind(promise, future);
+
+        auto consumer = [promise = std::move(promise), fun = std::forward<AsyncFunctor>(fun)](Res res) mutable {
+            Future<Res1> future1 = fun(std::move(res));
+            // TODO: fix this memleak by implementing "Future <-> Promise" bond more thoroughly
+            // (i.e. moving consumer straight into Promise instead of placing it in the Future --
+            // this provides symmetric way of handling such bond)
+            auto *future1_detached = new Future<Res1>(std::move(future1));
+            if constexpr (!std::is_void_v<Res1>) {
+                auto consumer1 = [promise = std::move(promise)](Res1 res1) mutable {
+                    promise.fulfill(std::move(res1));
+                };
+                future1_detached->set_consumer(std::move(consumer1));
+            } else {
+                auto consumer1 = [promise = std::move(promise)] mutable { promise.fulfill(); };
+                future1_detached->set_consumer(std::move(consumer1));
+            }
+        };
+        // TODO: same as above
+        auto *future_detached = new Future<Res>(std::move(*this));
+        future_detached->set_consumer_impl(std::move(consumer));
+
+        return future;
+    }
+
+    template<typename AsyncFunctor, typename Res1>
+    Future<Res1> Future<void>::then(AsyncFunctor &&fun) && {
+        Promise<Res1> promise;
+        Future<Res1> future;
+        AIO::bind(promise, future);
+
+        auto consumer = [promise = std::move(promise), fun = std::forward<AsyncFunctor>(fun)]() mutable {
+            Future<Res1> future1 = fun();
+            // TODO: fix this memleak by implementing "Future <-> Promise" bond more thoroughly
+            // (i.e. moving consumer straight into Promise instead of placing it in the Future --
+            // this provides symmetric way of handling such bond)
+            auto *future1_detached = new Future<Res1>(std::move(future1));
+            if constexpr (!std::is_void_v<Res1>) {
+                auto consumer1 = [promise = std::move(promise)](Res1 res1) mutable {
+                    promise.fulfill(std::move(res1));
+                };
+                future1_detached->set_consumer(std::move(consumer1));
+            } else {
+                auto consumer1 = [promise = std::move(promise)] mutable { promise.fulfill(); };
+                future1_detached->set_consumer(std::move(consumer1));
+            }
+        };
+        // TODO: same as above
+        auto *future_detached = new Future<void>(std::move(*this));
+        future_detached->set_consumer_impl(std::move(consumer));
+
+        return future;
+    }
+
+    template<typename Res, typename Res1>
+    Future<bool> operator|(Future<Res> &&future, Future<Res1> &&future1) {
+        Future<bool> result;
+        auto promise = std::make_shared<Promise<bool>>();
+        AIO::bind(result, *promise);
+
+        auto *future_detached = new Future(std::move(future));
+        future_detached->set_consumer([promise] (auto...) {
+            promise->fulfill(true);
+        });
+
+        auto *future1_detached = new Future(std::move(future1));
+        future1_detached->set_consumer([promise] (auto...) {
+            promise->fulfill(false);
+        });
+
+        return result;
+    }
+
 } // namespace AIO
