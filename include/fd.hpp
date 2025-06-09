@@ -1,8 +1,10 @@
 #pragma once
 
 #include <fcntl.h>
-#include <unistd.h>
 #include <filesystem>
+#include <unistd.h>
+
+#include "future.hpp"
 
 namespace AIO {
 
@@ -34,6 +36,8 @@ namespace AIO {
     public:
         static StreamFD open(SimpleEventLoop *loop, const std::filesystem::path &path, std::ios_base::openmode mode);
         static StreamFD steal_system(SimpleEventLoop *loop, FD::sys_t sys_fd);
+
+        Future<std::size_t> read(size_t buf_size, char *buffer) const;
 
     protected:
         using FD::FD;

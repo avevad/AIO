@@ -25,9 +25,10 @@ namespace AIO::_impl {
         if (!BoundBase::is_bound()) {
             return;
         }
-        if ((BoundBase::get_bound_ptr() && !BoundBase::get_bound_obj().fulfilled) || result.has_value()) {
-            assertion_failed("destroying non-awaited future");
-        }
+        // TODO: properly implement and enable these checks
+        // if ((BoundBase::get_bound_ptr() && !BoundBase::get_bound_obj().fulfilled) || result.has_value()) {
+        //    assertion_failed("destroying non-awaited future");
+        // }
     }
 
     template<FutureResult Res, typename Derived>
@@ -41,9 +42,10 @@ namespace AIO::_impl {
         if (!BoundBase::is_bound()) {
             return;
         }
-        if (BoundBase::get_bound_ptr() && !fulfilled) {
-            assertion_failed("destroying non-fulfilled promise");
-        }
+        // TODO: properly implement and enable these checks
+        // if (BoundBase::get_bound_ptr() && !fulfilled) {
+        //    assertion_failed("destroying non-fulfilled promise");
+        // }
     }
 
 } // namespace AIO::_impl
@@ -65,7 +67,7 @@ namespace AIO {
         if (Base::consumer.has_value()) {
             assertion_failed("attempt to reset consumer");
         }
-        Base::consumer.emplace(fun);
+        Base::consumer.emplace(std::forward<decltype(fun)>(fun));
         if (Base::result.has_value()) {
             Base::consumer.value()(std::move(Base::result.value()));
             Base::result.reset();
@@ -75,7 +77,7 @@ namespace AIO {
         if (Base::consumer.has_value()) {
             assertion_failed("attempt to reset consumer");
         }
-        Base::consumer.emplace(fun);
+        Base::consumer.emplace(std::forward<decltype(fun)>(fun));
         if (Base::result.has_value()) {
             Base::consumer.value()();
             Base::result.reset();

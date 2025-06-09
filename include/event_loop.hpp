@@ -1,8 +1,9 @@
 #pragma once
 
+#include "coroutine.hpp"
 #include "future.hpp"
-#include "util.hpp"
 #include "io.hpp"
+#include "util.hpp"
 
 #include <chrono>
 #include <list>
@@ -41,6 +42,8 @@ namespace AIO {
 
         void run();
 
+        const StreamFD std_in, std_out, std_err;
+
     private:
         struct CoroutineHolder : std::enable_shared_from_this<CoroutineHolder> {
             template<typename Functor>
@@ -75,8 +78,6 @@ namespace AIO {
 
         std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
         IOQueue io_queue;
-
-        const StreamFD std_in, std_out, std_err;
     };
 
     void run(const std::function<void(SimpleEventLoop &)> &main_function);

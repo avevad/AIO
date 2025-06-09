@@ -80,24 +80,39 @@ void sample_event_loop() {
         auto calculate = loop.async([&loop] -> int {
             std::cout << "Calculating the number..." << std::endl;
             loop.await(loop.timeout(1s));
-            return 42;
+            return 21;
+        });
+
+        auto multiply_by_2 = loop.async([&loop] (int x) -> int {
+            std::cout << "Multplying " << x << " by 2..." << std::endl;
+            loop.await(loop.timeout(1s));
+            return x * 2;
         });
 
         auto print_hello = loop.async([] -> void {
-            std::cout << "Hello from asynchronous task!" << std::endl;
+            std::cout << "Hello from some asynchronous task!" << std::endl;
         });
 
         std::cout << "Beginning of main" << std::endl;
-        print_hello().drop();
+        print_hello().then(print_hello).then(print_hello).drop();
 
         std::cout << "Starting calculation..." << std::endl;
-        auto future = calculate();
+        auto future = calculate().then(multiply_by_2);
         std::cout << "Started calculate() function" << std::endl;
 
         auto result = loop.await(std::move(future));
         std::cout << "Result: " << result << std::endl;
 
-        loop.await(loop.event({.sys_fd = STDIN_FILENO, .types = AIO::IOEvent::IN}));
+        std::cout << "Enter your name: ";
+        std::cout.flush();
+        // Don't do actual reading - just wait for *some* data -- if STDIN is a terminal,
+        // then a whole line would be ready for consequent std::istream read
+        loop.await(loop.std_in.read(0, nullptr));
+        std::cout << "Got it!" << std::endl;
+        std::string name;
+        std::cin >> name;
+
+        std::cout << "Hello, " << name << "" << std::endl;
     });
 }
 
