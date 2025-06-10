@@ -36,18 +36,18 @@ namespace AIO {
         using MetaFutureResultSubstituteT = std::conditional_t<std::is_void_v<Res>, std::monostate, Res>;
 
         template<FutureResult Res, typename Derived>
+        class PromiseBase;
+
+        template<FutureResult Res, typename Derived>
         class FutureBase : public Bound<Derived, Promise<Res>> {
         public:
-            FutureBase() = default;
-            FutureBase(FutureBase &&other) = default;
-            FutureBase &operator=(FutureBase &&other) noexcept = default;
+            using Result = Res;
 
-            void drop() &&;
-            void set_consumer(auto &&fun);
+            FutureBase() = default;
+            FutureBase(FutureBase &&other) noexcept;
+            FutureBase &operator=(FutureBase &&other) noexcept;
 
             ~FutureBase();
-
-            using Result = Res;
 
         private:
             using BoundBase = Bound<Derived, Promise<Res>>;
@@ -55,37 +55,37 @@ namespace AIO {
             using ResultSubstitute = MetaFutureResultSubstituteT<Res>;
 
             friend Promise<Res>;
+            friend PromiseBase<Res, Promise<Res>>;
             friend SimpleEventLoop;
             friend Derived;
 
-            template<typename... AcceptRes>
-            void accept(AcceptRes &&...res);
-
-            std::optional<Consumer> consumer = std::nullopt;
+            bool awaited = false;
             std::optional<ResultSubstitute> result = std::nullopt;
         };
 
         template<FutureResult Res, typename Derived>
         class PromiseBase : public Bound<Derived, Future<Res>> {
         public:
+            using Result = Res;
+
             PromiseBase() = default;
-
-            PromiseBase(PromiseBase &&other) = default;
-            PromiseBase &operator=(PromiseBase &&other) noexcept = default;
-
-            template<typename... FulfillRes>
-            void fulfill(FulfillRes &&...res);
+            PromiseBase(PromiseBase &&other) noexcept;
+            PromiseBase &operator=(PromiseBase &&other) noexcept;
 
             ~PromiseBase();
 
         private:
             using BoundBase = Bound<Derived, Future<Res>>;
+            using Consumer = typename Future<Res>::Consumer;
+            using ResultSubstitute = typename Future<Res>::ResultSubstitute;
 
             friend Future<Res>;
             friend FutureBase<Res, Future<Res>>;
+            friend SimpleEventLoop;
             friend Derived;
 
             bool fulfilled = false;
+            std::optional<Consumer> consumer = std::nullopt;
         };
 
     } // namespace _impl
@@ -102,11 +102,6 @@ namespace AIO {
 
     private:
         friend Base;
-
-        template<typename AcceptRes>
-        void accept_impl(AcceptRes &&res);
-
-        void set_consumer_impl(auto &&fun);
     };
 
     template<>
@@ -121,10 +116,6 @@ namespace AIO {
 
     private:
         friend Base;
-
-        void accept_impl();
-
-        void set_consumer_impl(auto &&fun);
     };
 
     template<FutureResult Res>
@@ -136,9 +127,6 @@ namespace AIO {
 
     private:
         friend Base;
-
-        template<typename FulfillRes>
-        void fulfill_impl(FulfillRes &&res);
     };
 
     template<>
@@ -150,8 +138,6 @@ namespace AIO {
 
     private:
         friend Base;
-
-        void fulfill_impl();
     };
 
     template<typename Res, typename Res1>
