@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(aio LANGUAGES CXX ASM)
 
 option(AIO_BUILD_TESTS "Build unittests for AIO" ON)
+option(AIO_RUNTIME_WARNINGS "Enable AIO runtime warnings in stderr" ON)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +19,10 @@ if (AIO_BUILD_TESTS)
 
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
+endif ()
+
+if (AIO_RUNTIME_WARNINGS)
+    add_compile_definitions(AIO_OPT_RUNTIME_WARNINGS=1)
 endif ()
 
 # Shared library

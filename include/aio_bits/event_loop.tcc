@@ -18,10 +18,10 @@ namespace AIO {
         auto job = [fun = std::forward<Functor>(fun), args = std::tuple<Args...>(std::forward<Args>(args)...),
                     promise = std::move(promise)] mutable {
             if constexpr (!std::is_void_v<Res>) {
-                promise.fulfill(std::apply(fun, args));
+                std::move(promise).fulfill(std::apply(fun, args));
             } else {
                 std::apply(fun, args);
-                promise.fulfill();
+                std::move(promise).fulfill();
             }
         };
         auto coro = std::make_shared<CoroutineHolder>(std::move(job));
@@ -52,14 +52,14 @@ namespace AIO {
                 result = std::move(res);
                 pending_tasks.push(std::move(task));
             };
-            future.set_consumer(consumer);
+            std::move(future).consume(std::move(consumer));
 
             current_coro.value()->wrapped.yield();
 
             return std::move(result.value());
         } else {
             auto consumer = [this, task = std::move(task)]() mutable { pending_tasks.push(std::move(task)); };
-            future.set_consumer(consumer);
+            std::move(future).consume(std::move(consumer));
 
             current_coro.value()->wrapped.yield();
 
@@ -94,11 +94,10 @@ namespace AIO {
 
     inline void run(const std::function<void(SimpleEventLoop &)> &main_function) {
         SimpleEventLoop loop;
-        loop.async_execute([&loop, &main_function]() -> std::monostate {
-                main_function(loop);
-                return {};
-            })
-            .drop();
+        auto loop_execute = loop.async([&loop, &main_function] { main_function(loop); });
+        auto loop_stop = loop.async([&loop] { loop.stop(); });
+
+        loop_execute().then(loop_stop).drop();
         loop.run();
     }
 
@@ -107,12 +106,27 @@ namespace AIO {
           std_err(StreamFD::steal_system(this, 2)) {
     }
 
+    inline void SimpleEventLoop::yield() {
+        if (!current_coro) {
+            assertion_failed("attempt to yield outside the event loop");
+        }
+        auto task = [this, coro = current_coro.value()] mutable { do_coroutine_step(std::move(coro)); };
+        pending_tasks.emplace(std::move(task));
+        current_coro.value()->wrapped.yield();
+    }
+
+    inline void SimpleEventLoop::stop() {
+        stopped = true;
+        yield();
+        assertion_failed("event loop stop trap");
+    }
+
     inline Future<void> SimpleEventLoop::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
         Future<void> future;
         Promise<void> promise;
         AIO::bind(future, promise);
 
-        auto task = [promise = std::move(promise)] mutable { promise.fulfill(); };
+        auto task = [promise = std::move(promise)] mutable { std::move(promise).fulfill(); };
         pending_timed_tasks.emplace(time, std::move(task));
 
         return future;
@@ -131,7 +145,7 @@ namespace AIO {
 
         IOEvent::Callback callback = [this, promise = std::move(promise),
                                       pending_task](IOEvent::Types event_types) mutable {
-            promise.fulfill(event_types);
+            std::move(promise).fulfill(event_types);
             io_queue.deregister_event(pending_task->event.sys_fd);
             pending_io_tasks.erase(pending_task->iter);
         };
@@ -146,7 +160,7 @@ namespace AIO {
 
     inline void SimpleEventLoop::run() {
         try {
-            while (true) {
+            while (!stopped) {
                 // Check regular tasks that are available unconditionally
                 if (!pending_tasks.empty()) {
                     Task task = std::move(pending_tasks.front());

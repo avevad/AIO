@@ -36,18 +36,20 @@ namespace AIO {
         using MetaFutureResultSubstituteT = std::conditional_t<std::is_void_v<Res>, std::monostate, Res>;
 
         template<FutureResult Res, typename Derived>
+        class PromiseBase;
+
+        template<FutureResult Res, typename Derived>
         class FutureBase : public Bound<Derived, Promise<Res>> {
         public:
+            using Result = Res;
+
             FutureBase() = default;
-            FutureBase(FutureBase &&other) = default;
-            FutureBase &operator=(FutureBase &&other) noexcept = default;
+            FutureBase(FutureBase &&other) noexcept;
+            FutureBase &operator=(FutureBase &&other) noexcept;
 
             void drop() &&;
-            void set_consumer(auto &&fun);
 
             ~FutureBase();
-
-            using Result = Res;
 
         private:
             using BoundBase = Bound<Derived, Promise<Res>>;
@@ -55,103 +57,100 @@ namespace AIO {
             using ResultSubstitute = MetaFutureResultSubstituteT<Res>;
 
             friend Promise<Res>;
+            friend PromiseBase<Res, Promise<Res>>;
             friend SimpleEventLoop;
             friend Derived;
 
-            template<typename... AcceptRes>
-            void accept(AcceptRes &&...res);
-
-            std::optional<Consumer> consumer = std::nullopt;
+            bool awaited = false;
             std::optional<ResultSubstitute> result = std::nullopt;
         };
 
         template<FutureResult Res, typename Derived>
         class PromiseBase : public Bound<Derived, Future<Res>> {
         public:
+            using Result = Res;
+
             PromiseBase() = default;
-
-            PromiseBase(PromiseBase &&other) = default;
-            PromiseBase &operator=(PromiseBase &&other) noexcept = default;
-
-            template<typename... FulfillRes>
-            void fulfill(FulfillRes &&...res);
+            PromiseBase(PromiseBase &&other) noexcept;
+            PromiseBase &operator=(PromiseBase &&other) noexcept;
 
             ~PromiseBase();
 
         private:
             using BoundBase = Bound<Derived, Future<Res>>;
+            using Consumer = typename Future<Res>::Consumer;
+            using ResultSubstitute = typename Future<Res>::ResultSubstitute;
 
             friend Future<Res>;
             friend FutureBase<Res, Future<Res>>;
+            friend SimpleEventLoop;
             friend Derived;
 
             bool fulfilled = false;
+            std::optional<Consumer> consumer = std::nullopt;
         };
 
     } // namespace _impl
 
     template<FutureResult Res>
-    class Future : public _impl::FutureBase<Res, Future<Res>> {
+    class Future final : public _impl::FutureBase<Res, Future<Res>> {
         using Base = _impl::FutureBase<Res, Future>;
 
     public:
         using Base::Base;
+
+        template<typename ConsumerArg>
+        void consume(ConsumerArg &&consumer) &&;
 
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor, Res>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
 
     private:
         friend Base;
-
-        template<typename AcceptRes>
-        void accept_impl(AcceptRes &&res);
-
-        void set_consumer_impl(auto &&fun);
     };
 
     template<>
-    class Future<void> : public _impl::FutureBase<void, Future<void>> {
+    class Future<void> final : public _impl::FutureBase<void, Future<void>> {
         using Base = _impl::FutureBase<void, Future>;
 
     public:
         using Base::Base;
+
+        template<typename ConsumerArg>
+        void consume(ConsumerArg &&consumer) &&;
 
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
 
     private:
         friend Base;
-
-        void accept_impl();
-
-        void set_consumer_impl(auto &&fun);
     };
 
     template<FutureResult Res>
-    class Promise : public _impl::PromiseBase<Res, Promise<Res>> {
+    class Promise final : public _impl::PromiseBase<Res, Promise<Res>> {
         using Base = _impl::PromiseBase<Res, Promise>;
 
     public:
         using Base::Base;
 
+        template<typename ResArg>
+        void fulfill(ResArg &&res) &&;
+
     private:
         friend Base;
-
-        template<typename FulfillRes>
-        void fulfill_impl(FulfillRes &&res);
     };
 
     template<>
-    class Promise<void> : public _impl::PromiseBase<void, Promise<void>> {
+    class Promise<void> final : public _impl::PromiseBase<void, Promise<void>> {
         using Base = _impl::PromiseBase<void, Promise>;
 
     public:
         using Base::Base;
 
+        void fulfill() &&;
+
     private:
         friend Base;
-
-        void fulfill_impl();
     };
 
     template<typename Res, typename Res1>

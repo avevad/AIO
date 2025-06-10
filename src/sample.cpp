@@ -31,8 +31,7 @@ void sample_contexts() {
     switch_to_context(context);
     std::cout << "Done" << std::endl;
 
-    /*
-     * -----------Contexts-----------
+    /* -----------Contexts-----------
      * Hello from main
      * Hello from subcontext
      * Finishing the subcontext
@@ -80,8 +79,7 @@ void sample_coroutines() {
     }
     std::cout << std::endl;
 
-    /*
-     * ----------Coroutines----------
+    /* ----------Coroutines----------
      * fib[1] = 1
      * fib[2] = 1
      * fib[3] = 2
@@ -137,8 +135,9 @@ void sample_event_loop() {
             loop.timeout(10s)
         )) {
             std::cout << "Got it!" << std::endl;
+
             std::string name;
-            std::cin >> name;
+            std::getline(std::cin, name);
 
             std::cout << "Hello, " << name << "" << std::endl;
         } else {
@@ -147,8 +146,7 @@ void sample_event_loop() {
 
     });
 
-    /*
-     * ----------Event loop----------
+    /* ----------Event loop----------
      * Beginning of main
      * Starting calculation...
      * Started calculate() function

@@ -33,6 +33,10 @@ namespace AIO {
         template<typename Res>
         Res await(Future<Res> future);
 
+        void yield();
+
+        [[noreturn]] void stop();
+
         template<typename Rep, typename Period>
         Future<void> timeout(const std::chrono::duration<Rep, Period> &duration);
 
@@ -78,6 +82,8 @@ namespace AIO {
 
         std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
         IOQueue io_queue;
+
+        bool stopped = false;
     };
 
     void run(const std::function<void(SimpleEventLoop &)> &main_function);
