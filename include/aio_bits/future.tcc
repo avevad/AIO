@@ -13,6 +13,8 @@ namespace AIO::_impl {
 
     template<FutureResult Res, typename Derived>
     FutureBase<Res, Derived> &FutureBase<Res, Derived>::operator=(FutureBase &&other) noexcept {
+        BoundBase::operator=(std::move(other));
+
         result = std::move(other.result);
         other.result.reset();
 
@@ -23,7 +25,12 @@ namespace AIO::_impl {
     }
 
     template<FutureResult Res, typename Derived>
-    FutureBase<Res, Derived>::FutureBase(FutureBase &&other) noexcept: result(std::move(other.result)), awaited(other.awaited) {
+    void FutureBase<Res, Derived>::drop() && {
+        std::move(*static_cast<Derived *>(this)).consume([] (auto...) {});
+    }
+
+    template<FutureResult Res, typename Derived>
+    FutureBase<Res, Derived>::FutureBase(FutureBase &&other) noexcept: BoundBase(std::move(other)), awaited(other.awaited), result(std::move(other.result)) {
         other.result.reset();
         other.awaited = true;
     }
@@ -31,12 +38,14 @@ namespace AIO::_impl {
     template<FutureResult Res, typename Derived>
     PromiseBase<Res, Derived>::~PromiseBase() {
         if (!fulfilled) {
-            assertion_failed("destroying non-fulfilled promise");
+            issue_warning("destroying non-fulfilled promise");
         }
     }
 
     template<FutureResult Res, typename Derived>
     PromiseBase<Res, Derived> &PromiseBase<Res, Derived>::operator=(PromiseBase &&other) noexcept {
+        BoundBase::operator=(std::move(other));
+
         consumer = std::move(other.consumer);
         other.consumer.reset();
 
@@ -47,7 +56,7 @@ namespace AIO::_impl {
     }
 
     template<FutureResult Res, typename Derived>
-    PromiseBase<Res, Derived>::PromiseBase(PromiseBase &&other) noexcept: consumer(std::move(other.consumer)), fulfilled(other.fulfilled) {
+    PromiseBase<Res, Derived>::PromiseBase(PromiseBase &&other) noexcept: BoundBase(std::move(other)), fulfilled(other.fulfilled), consumer(std::move(other.consumer)) {
         other.consumer.reset();
         other.fulfilled = true;
     }
@@ -59,60 +68,115 @@ namespace AIO {
     template<FutureResult Res>
     template<typename AsyncFunctor, typename Res1>
     Future<Res1> Future<Res>::then(AsyncFunctor &&fun) && {
-        Promise<Res1> promise;
         Future<Res1> future;
+        Promise<Res1> promise;
         AIO::bind(promise, future);
 
-        auto consumer = [promise = std::move(promise), fun = std::forward<AsyncFunctor>(fun)](Res res) mutable {
-            Future<Res1> future1 = fun(std::move(res));
-            // TODO: fix this memleak by implementing "Future <-> Promise" bond more thoroughly
-            // (i.e. moving consumer straight into Promise instead of placing it in the Future --
-            // this provides symmetric way of handling such bond)
-            auto *future1_detached = new Future<Res1>(std::move(future1));
-            if constexpr (!std::is_void_v<Res1>) {
-                auto consumer1 = [promise = std::move(promise)](Res1 res1) mutable {
-                    promise.fulfill(std::move(res1));
-                };
-                future1_detached->set_consumer(std::move(consumer1));
-            } else {
-                auto consumer1 = [promise = std::move(promise)] mutable { promise.fulfill(); };
-                future1_detached->set_consumer(std::move(consumer1));
-            }
+        auto consumer = [promise = std::move(promise), fun = std::forward<AsyncFunctor>(fun)] (Res res) mutable {
+            auto future1 = fun(std::move(res));
+            auto consumer1 = [promise = std::move(promise)]<typename ...Res1Arg>(Res1Arg &&...res1) mutable {
+                std::move(promise).fulfill(std::forward<Res1Arg>(res1)...);
+            };
+            std::move(future1).consume(std::move(consumer1));
         };
-        // TODO: same as above
-        auto *future_detached = new Future<Res>(std::move(*this));
-        future_detached->set_consumer_impl(std::move(consumer));
+        std::move(*this).consume(std::move(consumer));
 
         return future;
     }
 
+    template<FutureResult Res>
+    template<typename ConsumerArg>
+    void Future<Res>::consume(ConsumerArg &&consumer) && {
+        if (!Base::BoundBase::was_bound()) {
+            assertion_failed("future was not bound to any promise");
+        }
+
+        if (!Base::awaited) {
+            Base::awaited = true;
+        } else {
+            assertion_failed("attempt to await already awaited future");
+        }
+
+        if (Base::result.has_value()) {
+            consumer(std::move(Base::result.value()));
+        } else if (Base::BoundBase::is_bound()) {
+            Base::BoundBase::get_bound_obj().consumer.emplace(std::forward<ConsumerArg>(consumer));
+        }
+    }
+
     template<typename AsyncFunctor, typename Res1>
     Future<Res1> Future<void>::then(AsyncFunctor &&fun) && {
-        Promise<Res1> promise;
         Future<Res1> future;
+        Promise<Res1> promise;
         AIO::bind(promise, future);
 
-        auto consumer = [promise = std::move(promise), fun = std::forward<AsyncFunctor>(fun)]() mutable {
-            Future<Res1> future1 = fun();
-            // TODO: fix this memleak by implementing "Future <-> Promise" bond more thoroughly
-            // (i.e. moving consumer straight into Promise instead of placing it in the Future --
-            // this provides symmetric way of handling such bond)
-            auto *future1_detached = new Future<Res1>(std::move(future1));
-            if constexpr (!std::is_void_v<Res1>) {
-                auto consumer1 = [promise = std::move(promise)](Res1 res1) mutable {
-                    promise.fulfill(std::move(res1));
-                };
-                future1_detached->set_consumer(std::move(consumer1));
-            } else {
-                auto consumer1 = [promise = std::move(promise)] mutable { promise.fulfill(); };
-                future1_detached->set_consumer(std::move(consumer1));
-            }
+        auto consumer = [promise = std::move(promise), fun = std::forward<AsyncFunctor>(fun)] () mutable {
+            auto future1 = fun();
+            auto consumer1 = [promise = std::move(promise)]<typename ...Res1Arg>(Res1Arg &&...res1) mutable {
+                std::move(promise).fulfill(std::forward<Res1Arg>(res1)...);
+            };
+            std::move(future1).consume(std::move(consumer1));
         };
-        // TODO: same as above
-        auto *future_detached = new Future<void>(std::move(*this));
-        future_detached->set_consumer_impl(std::move(consumer));
+        std::move(*this).consume(std::move(consumer));
 
         return future;
+    }
+
+    template<typename ConsumerArg>
+    void Future<void>::consume(ConsumerArg &&consumer) && {
+        if (!Base::BoundBase::was_bound()) {
+            assertion_failed("future was not bound to any promise");
+        }
+
+        if (!Base::awaited) {
+            Base::awaited = true;
+        } else {
+            assertion_failed("attempt to await already awaited future");
+        }
+
+        if (Base::result.has_value()) {
+            consumer();
+        } else {
+            Base::BoundBase::get_bound_obj().consumer.emplace(std::forward<ConsumerArg>(consumer));
+        }
+    }
+
+    template<FutureResult Res>
+    template<typename ResArg>
+    void Promise<Res>::fulfill(ResArg &&res) && {
+        if (!Base::BoundBase::was_bound()) {
+            assertion_failed("promise was not bound to any future");
+        }
+
+        if (!Base::fulfilled) {
+            Base::fulfilled = true;
+        } else {
+            assertion_failed("attempt to fulfill already fulfilled promise");
+        }
+
+        if (Base::consumer.has_value()) {
+            Base::consumer.value()(std::forward<ResArg>(res));
+        } else {
+            Base::BoundBase::get_bound_obj().result.emplace(std::forward<ResArg>(res));
+        }
+    }
+
+    inline void Promise<void>::fulfill() && {
+        if (!Base::BoundBase::was_bound()) {
+            assertion_failed("promise was not bound to any future");
+        }
+
+        if (!Base::fulfilled) {
+            Base::fulfilled = true;
+        } else {
+            assertion_failed("attempt to fulfill already fulfilled promise");
+        }
+
+        if (Base::consumer.has_value()) {
+            Base::consumer.value()();
+        } else {
+            Base::BoundBase::get_bound_obj().result.emplace();
+        }
     }
 
     template<typename Res, typename Res1>
@@ -121,15 +185,9 @@ namespace AIO {
         auto promise = std::make_shared<Promise<bool>>();
         AIO::bind(result, *promise);
 
-        auto *future_detached = new Future(std::move(future));
-        future_detached->set_consumer([promise] (auto...) {
-            promise->fulfill(true);
-        });
+        std::move(future).consume([promise](auto...) { std::move(*promise).fulfill(true); });
 
-        auto *future1_detached = new Future(std::move(future1));
-        future1_detached->set_consumer([promise] (auto...) {
-            promise->fulfill(false);
-        });
+        std::move(future1).consume([promise](auto...) { std::move(*promise).fulfill(false); });
 
         return result;
     }

@@ -47,6 +47,8 @@ namespace AIO {
             FutureBase(FutureBase &&other) noexcept;
             FutureBase &operator=(FutureBase &&other) noexcept;
 
+            void drop() &&;
+
             ~FutureBase();
 
         private:
@@ -91,11 +93,14 @@ namespace AIO {
     } // namespace _impl
 
     template<FutureResult Res>
-    class Future : public _impl::FutureBase<Res, Future<Res>> {
+    class Future final : public _impl::FutureBase<Res, Future<Res>> {
         using Base = _impl::FutureBase<Res, Future>;
 
     public:
         using Base::Base;
+
+        template<typename ConsumerArg>
+        void consume(ConsumerArg &&consumer) &&;
 
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor, Res>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
@@ -105,11 +110,14 @@ namespace AIO {
     };
 
     template<>
-    class Future<void> : public _impl::FutureBase<void, Future<void>> {
+    class Future<void> final : public _impl::FutureBase<void, Future<void>> {
         using Base = _impl::FutureBase<void, Future>;
 
     public:
         using Base::Base;
+
+        template<typename ConsumerArg>
+        void consume(ConsumerArg &&consumer) &&;
 
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
@@ -119,22 +127,27 @@ namespace AIO {
     };
 
     template<FutureResult Res>
-    class Promise : public _impl::PromiseBase<Res, Promise<Res>> {
+    class Promise final : public _impl::PromiseBase<Res, Promise<Res>> {
         using Base = _impl::PromiseBase<Res, Promise>;
 
     public:
         using Base::Base;
+
+        template<typename ResArg>
+        void fulfill(ResArg &&res) &&;
 
     private:
         friend Base;
     };
 
     template<>
-    class Promise<void> : public _impl::PromiseBase<void, Promise<void>> {
+    class Promise<void> final : public _impl::PromiseBase<void, Promise<void>> {
         using Base = _impl::PromiseBase<void, Promise>;
 
     public:
         using Base::Base;
+
+        void fulfill() &&;
 
     private:
         friend Base;

@@ -10,6 +10,9 @@ namespace AIO {
     [[noreturn]] void
     assertion_failed(const std::string &what, std::source_location where = std::source_location::current());
 
+    void
+    issue_warning(const std::string &what, std::source_location where = std::source_location::current());
+
     template<typename Derived, typename Derived1>
     class Bound {
     public:
@@ -51,6 +54,10 @@ namespace AIO {
 
     protected:
         bool is_bound() {
+            return bond.has_value() && bond.value();
+        }
+
+        bool was_bound() {
             return bond.has_value();
         }
 
@@ -66,14 +73,6 @@ namespace AIO {
                 assertion_failed("accessing non-existent bond");
             }
             return *bond.value();
-        }
-
-        void unbind() {
-            if (!is_bound()) {
-                assertion_failed("attempt to unbind unbound object");
-            }
-            get_bound_base_ptr()->bond = nullptr;
-            bond = nullptr;
         }
 
     private:

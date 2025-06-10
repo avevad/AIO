@@ -71,7 +71,7 @@ namespace AIO::_impl {
     template<typename Ret, typename Arg, typename Derived>
     CoroutineBase<Ret, Arg, Derived>::~CoroutineBase() {
         if (!is_dead()) {
-            assertion_failed("destroying runnable coroutine");
+            issue_warning("destroying runnable coroutine");
         }
     }
 
