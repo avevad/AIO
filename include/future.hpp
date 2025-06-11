@@ -18,23 +18,25 @@ namespace AIO {
     template<FutureResult Res>
     class Future;
 
+    template<typename Res>
+    struct WrappedResult {
+        Res obj;
+
+        auto move_out() {
+            return std::move(obj);
+        }
+    };
+
+    template<>
+    struct WrappedResult<void> {
+        void move_out() {
+        }
+    };
+
+    template<typename Res>
+    using MaybeResult = std::variant<WrappedResult<Res>, std::exception_ptr>;
+
     namespace _impl {
-        template<FutureResult Res>
-        struct MetaConsumerSignature {
-            using Type = void(Res);
-        };
-
-        template<>
-        struct MetaConsumerSignature<void> {
-            using Type = void();
-        };
-
-        template<FutureResult Res>
-        using MetaConsumerSignatureT = typename MetaConsumerSignature<Res>::Type;
-
-        template<FutureResult Res>
-        using MetaFutureResultSubstituteT = std::conditional_t<std::is_void_v<Res>, std::monostate, Res>;
-
         template<FutureResult Res, typename Derived>
         class PromiseBase;
 
@@ -49,12 +51,14 @@ namespace AIO {
 
             void drop() &&;
 
+            template<typename Error, typename ErrorHandler>
+            Future<Res> except(ErrorHandler &&handler);
+
             ~FutureBase();
 
         private:
             using BoundBase = Bound<Derived, Promise<Res>>;
-            using Consumer = std::move_only_function<MetaConsumerSignatureT<Res>>;
-            using ResultSubstitute = MetaFutureResultSubstituteT<Res>;
+            using Consumer = std::move_only_function<void(MaybeResult<Res>)>;
 
             friend Promise<Res>;
             friend PromiseBase<Res, Promise<Res>>;
@@ -62,7 +66,8 @@ namespace AIO {
             friend Derived;
 
             bool awaited = false;
-            std::optional<ResultSubstitute> result = std::nullopt;
+            std::optional<WrappedResult<Res>> result = std::nullopt;
+            std::exception_ptr error = nullptr;
         };
 
         template<FutureResult Res, typename Derived>
@@ -74,12 +79,16 @@ namespace AIO {
             PromiseBase(PromiseBase &&other) noexcept;
             PromiseBase &operator=(PromiseBase &&other) noexcept;
 
+            void fail(std::exception_ptr error) &&;
+            void propagate(MaybeResult<Res> maybe_res) &&;
+
+            [[nodiscard]] bool is_fulfilled();
+
             ~PromiseBase();
 
         private:
             using BoundBase = Bound<Derived, Future<Res>>;
             using Consumer = typename Future<Res>::Consumer;
-            using ResultSubstitute = typename Future<Res>::ResultSubstitute;
 
             friend Future<Res>;
             friend FutureBase<Res, Future<Res>>;
@@ -99,8 +108,7 @@ namespace AIO {
     public:
         using Base::Base;
 
-        template<typename ConsumerArg>
-        void consume(ConsumerArg &&consumer) &&;
+        void consume(typename Base::Consumer consumer) &&;
 
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor, Res>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
@@ -116,8 +124,7 @@ namespace AIO {
     public:
         using Base::Base;
 
-        template<typename ConsumerArg>
-        void consume(ConsumerArg &&consumer) &&;
+        void consume(typename Base::Consumer consumer) &&;
 
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
@@ -133,8 +140,7 @@ namespace AIO {
     public:
         using Base::Base;
 
-        template<typename ResArg>
-        void fulfill(ResArg &&res) &&;
+        void fulfill(Res res) &&;
 
     private:
         friend Base;

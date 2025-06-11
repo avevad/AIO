@@ -113,11 +113,33 @@ void sample_event_loop() {
         });
 
         auto print_hello = loop.async([] -> void {
-            std::cout << "Hello from some asynchronous task!" << std::endl;
+            std::cout << "  Hello from some noisy background task!" << std::endl;
+        });
+
+        auto small_delay = [&loop] () { return loop.timeout(700ms); };
+
+        auto get_user_secret = loop.async([&loop] (const std::optional<std::string> &user_name) -> std::string {
+            std::cout << "Checking username..." << std::endl;
+            loop.await(loop.timeout(1s));
+            if (user_name.value().length() > 10) {
+                throw std::length_error("username is too long");
+            }
+            std::cout << "Obtaining user data..." << std::endl;
+            loop.await(loop.timeout(2s));
+            if (user_name.value() != "avevad") {
+                throw std::invalid_argument("user not found");
+            }
+            return "lorem ipsum";
         });
 
         std::cout << "Beginning of main" << std::endl;
-        print_hello().then(print_hello).then(print_hello).drop();
+        print_hello()
+            .then(print_hello)
+            .then(small_delay)
+            .then(print_hello)
+            .then(small_delay)
+            .then(print_hello)
+            .drop();
 
         std::cout << "Starting calculation..." << std::endl;
         auto future = calculate().then(multiply_by_2);
@@ -126,13 +148,14 @@ void sample_event_loop() {
         auto result = loop.await(std::move(future));
         std::cout << "Result: " << result << std::endl;
 
+        std::optional<std::string> user_name;
         std::cout << "Enter your name: ";
         std::cout.flush();
         // Don't do actual reading - just wait for *some* data -- if STDIN is a terminal,
         // then a whole line would be ready for consequent std::istream read
         if (loop.await(
             loop.std_in.read(0, nullptr) |
-            loop.timeout(10s)
+            loop.timeout(5s)
         )) {
             std::cout << "Got it!" << std::endl;
 
@@ -140,9 +163,35 @@ void sample_event_loop() {
             std::getline(std::cin, name);
 
             std::cout << "Hello, " << name << "" << std::endl;
+            user_name = name;
         } else {
             std::cout << "(timeout)" << std::endl;
         }
+
+        print_hello()
+            .then(print_hello)
+            .then(small_delay)
+            .then(print_hello)
+            .then(small_delay)
+            .then(print_hello)
+            .drop();
+
+        loop.await(
+            get_user_secret(user_name)
+            .then(loop.async([] (const std::string &secret) {
+                std::cout << "Here is your secret: '" << secret << "'" << std::endl;
+            }))
+            .except<std::invalid_argument>([] (const std::invalid_argument &e) {
+                std::cout << "! Invalid input: " << e.what() << std::endl;
+                return AIO::WrappedResult<void>{};
+            })
+            .except<std::length_error>([] (const std::length_error &e) {
+                std::cout << "! Overflow: " << e.what() << std::endl;
+                return AIO::WrappedResult<void>{};
+            })
+        );
+
+        std::cout << "Done" << std::endl;
 
     });
 
