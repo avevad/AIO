@@ -208,4 +208,10 @@ namespace AIO {
         }
     }
 
+    inline SimpleEventLoop::~SimpleEventLoop() {
+        std::move(const_cast<StreamFD &>(std_in)).release_to_system();
+        std::move(const_cast<StreamFD &>(std_out)).release_to_system();
+        std::move(const_cast<StreamFD &>(std_err)).release_to_system();
+    }
+
 } // namespace AIO

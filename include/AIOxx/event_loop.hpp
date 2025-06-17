@@ -46,6 +46,8 @@ namespace AIO {
 
         void run();
 
+        ~SimpleEventLoop();
+
         const StreamFD std_in, std_out, std_err;
 
     private:

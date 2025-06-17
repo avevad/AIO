@@ -11,6 +11,12 @@ namespace AIO {
         return fd;
     }
 
+    FD::sys_t FD::release_to_system() && {
+        auto fd_tmp = fd;
+        fd = -1;
+        return fd_tmp;
+    }
+
     FD::~FD() {
         if (fd != -1) {
             close(fd);
