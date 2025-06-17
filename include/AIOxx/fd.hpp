@@ -14,16 +14,16 @@ namespace AIO {
     public:
         using sys_t = int;
 
-        [[nodiscard]] sys_t sys_fd() const;
-
-        ~FD();
-
         FD(const FD &) = delete;
         FD &operator=(const FD &) = delete;
 
         FD(FD &&other) noexcept;
-
         FD &operator=(FD &&other) noexcept;
+
+        [[nodiscard]] sys_t sys_fd() const;
+        sys_t release_to_system() &&;
+
+        ~FD();
 
     protected:
         FD(SimpleEventLoop *loop, sys_t sys_fd);
