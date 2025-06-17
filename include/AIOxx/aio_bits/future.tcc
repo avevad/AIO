@@ -1,6 +1,8 @@
 #pragma once
 
-#include "future.hpp"
+#include "AIOxx/future.hpp"
+
+#include <memory>
 
 namespace AIO::_impl {
 

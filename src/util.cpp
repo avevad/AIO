@@ -1,4 +1,4 @@
-#include "util.hpp"
+#include "AIOxx/util.hpp"
 
 #include <cxxabi.h>
 
@@ -29,7 +29,7 @@ void AIO::assertion_failed(const std::string &what, const std::exception &e, std
 
 void AIO::issue_warning(
     const std::string __attribute_maybe_unused__ &what, std::source_location __attribute_maybe_unused__ where) {
-#ifdef AIO_OPT_RUNTIME_WARNINGS
+#ifdef AIOXX_OPT_RUNTIME_WARNINGS
     if (!std::getenv("AIO_NO_RUNTIME_WARNINGS")) {
         std::cerr << std::string(where.file_name()) + ":" + std::to_string(where.line()) + ":" +
                          std::to_string(where.column()) +
