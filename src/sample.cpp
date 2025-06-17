@@ -182,14 +182,12 @@ void sample_event_loop() {
                 .then(loop.async([] (const std::string &secret) {
                     std::cout << "Here is your secret: '" << secret << "'" << std::endl;
                 }))
-                .except<std::invalid_argument>([] (const std::invalid_argument &e) {
+                .except<std::invalid_argument>(loop.async([] (const std::invalid_argument &e) {
                     std::cout << "! Invalid input: " << e.what() << std::endl;
-                    return AIO::WrappedResult<void>{};
-                })
-                .except<std::length_error>([] (const std::length_error &e) {
+                }))
+                .except<std::length_error>(loop.async([] (const std::length_error &e) {
                     std::cout << "! Overflow: " << e.what() << std::endl;
-                    return AIO::WrappedResult<void>{};
-                })
+                }))
             );
         } catch (std::bad_optional_access &) {
             // unhandled by .except()-clauses exceptions will be thrown out of await()

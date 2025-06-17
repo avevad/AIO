@@ -26,8 +26,8 @@ namespace AIO::_impl {
 
     template<FutureResult Res, typename Derived>
     void FutureBase<Res, Derived>::drop() && {
-        std::move(*static_cast<Derived *>(this)).consume([](MaybeResult<Res> maybe_result) {
-            if (auto *error = std::get_if<std::exception_ptr>(&maybe_result)) [[unlikely]] {
+        std::move(*static_cast<Derived *>(this)).consume([](MaybeResult<Res> maybe_res) {
+            if (auto *error = std::get_if<std::exception_ptr>(&maybe_res)) [[unlikely]] {
                 try {
                     std::rethrow_exception(*error);
                 } catch (std::exception &e) {
@@ -40,42 +40,36 @@ namespace AIO::_impl {
     }
 
     template<FutureResult Res, typename Derived>
-    template<typename Error, typename ErrorHandler>
-    Future<Res> FutureBase<Res, Derived>::except(ErrorHandler &&handler) {
+    template<typename Error, typename AsyncFunctor>
+    Future<Res> FutureBase<Res, Derived>::except(AsyncFunctor &&handler) {
         Future<Res> future;
         Promise<Res> promise;
-        AIO::bind(future, promise);
+        AIO::bind(promise, future);
 
-        // TODO: maybe make it a bit simpler...
-
-        std::move(*static_cast<Derived *>(this)).consume([
-            promise = std::move(promise), handler = std::forward<ErrorHandler>(handler)
-        ] (MaybeResult<Res> maybe_result) mutable {
-            if (auto *error = std::get_if<std::exception_ptr>(&maybe_result)) [[unlikely]] {
+        auto consumer = [
+            promise = std::move(promise), handler = std::forward<AsyncFunctor>(handler)
+        ] (const MaybeResult<Res> &maybe_res) mutable {
+            if (auto *error = std::get_if<std::exception_ptr>(&maybe_res)) [[unlikely]] {
                 try {
                     std::rethrow_exception(*error);
                 } catch (Error &e) {
-                    std::optional<WrappedResult<Res>> maybe_result1 = handler(e);
-                    if (maybe_result1.has_value()) {
-                        if constexpr (!std::is_void_v<Res>) {
-                            std::move(promise).fulfill(std::move(maybe_result1.value().obj));
-                        } else {
-                            std::move(promise).fulfill();
-                        }
-                    } else {
-                        std::move(promise).fail(*error);
-                    }
+                    Future<Res> future1 = handler(e);
+                    auto consumer1 = [promise = std::move(promise)](MaybeResult<Res> maybe_res1) mutable {
+                        std::move(promise).propagate(maybe_res1);
+                    };
+                    std::move(future1).consume(std::move(consumer1));
                 } catch (...) {
                     std::move(promise).fail(std::current_exception());
                 }
             } else {
-                if constexpr (!std::is_void_v<Res>) {
-                    std::move(promise).fulfill(std::move(std::get<WrappedResult<Res>>(maybe_result).obj));
-                } else {
+                if constexpr (std::is_void_v<Res>) {
                     std::move(promise).fulfill();
+                } else {
+                    std::move(promise).fulfill(std::move(std::get<WrappedResult<Res>>(maybe_res).obj));
                 }
             }
-        });
+        };
+        std::move(*static_cast<Derived *>(this)).consume(std::move(consumer));
 
         return future;
     }
@@ -164,7 +158,7 @@ namespace AIO {
             promise = std::move(promise), fun = std::forward<AsyncFunctor>(fun)
         ] (const MaybeResult<Res> &maybe_res) mutable {
             if (auto *res = std::get_if<WrappedResult<Res>>(&maybe_res)) {
-                auto future1 = fun(std::move(res->obj));
+                Future<Res1> future1 = fun(std::move(res->obj));
                 auto consumer1 = [promise = std::move(promise)](MaybeResult<Res1> maybe_res1) mutable {
                     std::move(promise).propagate(std::move(maybe_res1));
                 };
@@ -208,7 +202,7 @@ namespace AIO {
         auto consumer = [promise = std::move(promise),
                          fun = std::forward<AsyncFunctor>(fun)](const MaybeResult<void> &maybe_res) mutable {
             if (std::get_if<WrappedResult<void>>(&maybe_res)) {
-                auto future1 = fun();
+                Future<Res1> future1 = fun();
                 auto consumer1 = [promise = std::move(promise)](MaybeResult<Res1> maybe_res1) mutable {
                     std::move(promise).propagate(std::move(maybe_res1));
                 };
