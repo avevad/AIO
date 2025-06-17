@@ -17,11 +17,15 @@ namespace AIO {
 
         auto job = [fun = std::forward<Functor>(fun), args = std::tuple<Args...>(std::forward<Args>(args)...),
                     promise = std::move(promise)] mutable {
-            if constexpr (!std::is_void_v<Res>) {
-                std::move(promise).fulfill(std::apply(fun, args));
-            } else {
-                std::apply(fun, args);
-                std::move(promise).fulfill();
+            try {
+                if constexpr (!std::is_void_v<Res>) {
+                    std::move(promise).fulfill(std::apply(fun, args));
+                } else {
+                    std::apply(fun, args);
+                    std::move(promise).fulfill();
+                }
+            } catch (...) {
+                std::move(promise).fail(std::current_exception());
             }
         };
         auto coro = std::make_shared<CoroutineHolder>(std::move(job));
@@ -46,25 +50,26 @@ namespace AIO {
         }
 
         auto task = [this, coro = current_coro.value()] mutable { do_coroutine_step(std::move(coro)); };
-        if constexpr (!std::is_void_v<Res>) {
-            std::optional<Res> result = std::nullopt;
-            auto consumer = [this, task = std::move(task), &result](Res &&res) mutable {
-                result = std::move(res);
-                pending_tasks.push(std::move(task));
-            };
-            std::move(future).consume(std::move(consumer));
 
-            current_coro.value()->wrapped.yield();
+        std::optional<WrappedResult<Res>> result = std::nullopt;
+        std::exception_ptr error = nullptr;
+        auto consumer = [this, task = std::move(task), &result, &error](MaybeResult<Res> maybe_res) mutable {
+            if (auto *res = std::get_if<WrappedResult<Res>>(&maybe_res)) {
+                result = std::move(*res);
+            } else {
+                error = std::get<std::exception_ptr>(maybe_res);
+            }
+            pending_tasks.push(std::move(task));
+        };
+        std::move(future).consume(std::move(consumer));
 
-            return std::move(result.value());
-        } else {
-            auto consumer = [this, task = std::move(task)]() mutable { pending_tasks.push(std::move(task)); };
-            std::move(future).consume(std::move(consumer));
+        current_coro.value()->wrapped.yield();
 
-            current_coro.value()->wrapped.yield();
-
-            return;
+        if (error) [[unlikely]] {
+            std::rethrow_exception(error);
         }
+
+        return result.value().move_out();
     }
     template<typename Rep, typename Period>
     Future<void> SimpleEventLoop::timeout(const std::chrono::duration<Rep, Period> &duration) {
@@ -197,8 +202,10 @@ namespace AIO {
 
                 break;
             }
+        } catch (std::exception &e) {
+            assertion_failed("exception in event loop", e);
         } catch (...) {
-            assertion_failed("exception in event loop");
+            assertion_failed("unknown exception in event loop");
         }
     }
 
