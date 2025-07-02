@@ -7,7 +7,7 @@
 #include "util.hpp"
 
 namespace AIO {
-    class SimpleEventLoop;
+    class BasicEventLoop;
 
     template<typename Res>
     concept FutureResult = !std::is_reference_v<Res>;
@@ -62,7 +62,7 @@ namespace AIO {
 
             friend Promise<Res>;
             friend PromiseBase<Res, Promise<Res>>;
-            friend SimpleEventLoop;
+            friend BasicEventLoop;
             friend Derived;
 
             bool awaited = false;
@@ -92,7 +92,7 @@ namespace AIO {
 
             friend Future<Res>;
             friend FutureBase<Res, Future<Res>>;
-            friend SimpleEventLoop;
+            friend BasicEventLoop;
             friend Derived;
 
             bool fulfilled = false;

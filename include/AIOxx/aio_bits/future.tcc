@@ -253,7 +253,7 @@ namespace AIO {
         if (Base::consumer.has_value()) {
             Base::consumer.value()(WrappedResult<Res>{std::move(res)});
         } else {
-            Base::BoundBase::get_bound_obj().result = WrappedResult<Res>{std::move(res)};
+            Base::BoundBase::get_bound_obj().result.emplace(std::move(res));
         }
     }
 

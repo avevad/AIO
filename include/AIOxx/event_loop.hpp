@@ -14,15 +14,15 @@
 
 namespace AIO {
 
-    class SimpleEventLoop {
+    class BasicEventLoop {
     public:
-        SimpleEventLoop();
+        BasicEventLoop();
 
-        SimpleEventLoop(const SimpleEventLoop &) = delete;
-        SimpleEventLoop(SimpleEventLoop &&other) = delete;
+        BasicEventLoop(const BasicEventLoop &) = delete;
+        BasicEventLoop(BasicEventLoop &&other) = delete;
 
-        SimpleEventLoop &operator=(const SimpleEventLoop &) = delete;
-        SimpleEventLoop &operator=(SimpleEventLoop &&other) = delete;
+        BasicEventLoop &operator=(const BasicEventLoop &) = delete;
+        BasicEventLoop &operator=(BasicEventLoop &&other) = delete;
 
         template<typename Functor, typename... Args>
         Future<std::invoke_result_t<Functor, Args...>> async_execute(Functor &&fun, Args &&...args);
@@ -46,7 +46,7 @@ namespace AIO {
 
         void run();
 
-        ~SimpleEventLoop();
+        ~BasicEventLoop();
 
         const StreamFD std_in, std_out, std_err;
 
@@ -88,7 +88,7 @@ namespace AIO {
         bool stopped = false;
     };
 
-    void run(const std::function<void(SimpleEventLoop &)> &main_function);
+    void run(const std::function<void(BasicEventLoop &)> &main_function);
 
 } // namespace AIO
 
