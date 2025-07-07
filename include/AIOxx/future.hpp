@@ -113,6 +113,9 @@ namespace AIO {
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor, Res>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
 
+        template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Res>>
+        Future<Res1> map(Functor &&fun) &&;
+
     private:
         friend Base;
     };
@@ -128,6 +131,9 @@ namespace AIO {
 
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
+
+        template<typename Functor, typename Res1 = std::invoke_result_t<Functor>>
+        Future<Res1> map(Functor &&fun) &&;
 
     private:
         friend Base;

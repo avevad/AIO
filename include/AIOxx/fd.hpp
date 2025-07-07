@@ -42,7 +42,8 @@ namespace AIO {
         StreamFD(StreamFD &&other) noexcept;
         using FD::operator=;
 
-        Future<std::size_t> read(size_t buf_size, char *buffer) const;
+        Future<std::size_t> read(size_t size, char *data) const;
+        Future<std::size_t> write(size_t size, const char *data) const;
 
     protected:
         StreamFD(BasicEventLoop *loop, sys_t sys_fd);
@@ -50,12 +51,12 @@ namespace AIO {
 
     class StreamSocketFD : public StreamFD {
     public:
-        static Future<StreamSocketFD> connect(BasicEventLoop *loop, const std::string &hostname, const std::string &service);
+        static Future<StreamSocketFD> connect(BasicEventLoop *loop, const std::string &host, const std::string &service);
 
         StreamSocketFD(StreamSocketFD &&other) noexcept;
         using StreamFD::operator=;
 
-        void shutdown(bool read = true, bool write = true);
+        void shutdown(bool read = true, bool write = true) const;
 
         ~StreamSocketFD();
 
@@ -70,9 +71,29 @@ namespace AIO {
         StreamServerFD(StreamServerFD &&other) noexcept;
         using FD::operator=;
 
-        StreamServerFD(BasicEventLoop *loop, const std::string &hostname, const std::string &service);
+        StreamServerFD(BasicEventLoop *loop, const std::string &host, const std::string &service);
 
         Future<StreamSocketFD> accept();
     };
 
+    template<std::derived_from<StreamSocketFD> BaseFD>
+    class BufferedStreamFD : public BaseFD {
+    public:
+        explicit BufferedStreamFD(BaseFD base) : BaseFD(std::move(base)) {
+        }
+
+        Future<std::size_t> read(size_t size, char *data) const;
+        Future<std::size_t> write(size_t size, const char *data) const;
+        std::string read_until(char delim, size_t limit = std::numeric_limits<size_t>::max());
+
+        [[nodiscard]] Future<bool> flush() const;
+
+    private:
+        std::unique_ptr<char[]> i_buf = std::make_unique<char[]>(1024), o_buf = std::make_unique<char[]>(1024);
+        mutable size_t i_sz = 0, o_sz = 0;
+        size_t i_cap = 1024, o_cap = 1024;
+    };
+
 } // namespace AIO
+
+#include "aio_bits/fd.tcc"

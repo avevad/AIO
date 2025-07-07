@@ -43,57 +43,52 @@ namespace AIO {
     FD::FD(BasicEventLoop *loop, sys_t sys_fd) : fd(sys_fd), loop(loop) {
     }
 
-    FD::sys_t make_server_socket(const std::string &hostname, const std::string &service) {
+    FD::sys_t make_server_socket(const std::string &host, const std::string &service) {
         addrinfo addr_hints = {
-            .ai_flags = AI_PASSIVE,
+            .ai_flags = AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV,
             .ai_family = AF_UNSPEC,
             .ai_socktype = SOCK_STREAM,
             .ai_protocol = 0,
             .ai_addrlen = 0,
             .ai_addr = nullptr,
             .ai_canonname = nullptr,
-            .ai_next = nullptr};
+            .ai_next = nullptr
+        };
         addrinfo *addr_info = nullptr;
-
-        int res = getaddrinfo(hostname.c_str(), service.c_str(), &addr_hints, &addr_info);
-        if (res != 0) {
-            throw SystemError("name resolution for `" + hostname + ":" + service + "` failed: " + gai_strerror(res));
+        int res = getaddrinfo(host.c_str(), service.c_str(), &addr_hints, &addr_info);
+        if (res != 0 || !addr_info) {
+            throw SystemError(
+                "host/service resolution for `"
+                + host + ":" + service
+                + "` failed: "
+                + gai_strerror(res)
+            );
         }
 
-        std::string last_error = "no address resolved";
-        int fd = 0;
-        addrinfo *conn_addr = addr_info;
-        for (; conn_addr != nullptr; conn_addr = conn_addr->ai_next) {
-            fd = socket(conn_addr->ai_family, conn_addr->ai_socktype, conn_addr->ai_protocol);
-            if (fd < 0) {
-                last_error = std::string("socket: ") + strerror(errno);
-                continue;
-            }
+        int fd = socket(addr_info->ai_family, addr_info->ai_socktype, addr_info->ai_protocol);
+        if (fd < 0) {
+            freeaddrinfo(addr_info);
+            throw SystemError(std::string("socket: ") + strerror(errno));
+        }
 
-            if (::bind(fd, conn_addr->ai_addr, conn_addr->ai_addrlen) < 0) {
-                last_error = std::string("bind: ") + strerror(errno);
-                close(fd);
-                continue;
-            }
+        if (::bind(fd, addr_info->ai_addr, addr_info->ai_addrlen) < 0) {
+            freeaddrinfo(addr_info);
+            close(fd);
+            throw SystemError(std::string("bind: ") + strerror(errno));
+        }
 
-            break;
+        if (listen(fd, 1024) < 0) {
+            freeaddrinfo(addr_info);
+            close(fd);
+            throw SystemError(std::string("listen: ") + strerror(errno));
         }
 
         freeaddrinfo(addr_info);
-
-        if (conn_addr == nullptr) {
-            throw SystemError("`" + hostname + ":" + service + "`: " + last_error);
-        }
-
         return fd;
     }
 
-    StreamServerFD::StreamServerFD(BasicEventLoop *loop, const std::string &hostname, const std::string &service)
-    : FD(loop, make_server_socket(hostname, service)) {
-        if (listen(fd, 1024) < 0) {
-            close(fd);
-            throw SystemError("`" + hostname + ":" + service + "`: listen: " + strerror(errno));
-        }
+    StreamServerFD::StreamServerFD(BasicEventLoop *loop, const std::string &host, const std::string &service)
+    : FD(loop, make_server_socket(host, service)) {
     }
 
     Future<StreamSocketFD> StreamServerFD::accept() {
@@ -131,81 +126,80 @@ namespace AIO {
     StreamFD::StreamFD(StreamFD &&other) noexcept : FD(std::move(other)) {
     }
 
-    Future<std::size_t> StreamFD::read(size_t buf_size, char *buffer) const {
+    Future<std::size_t> StreamFD::read(size_t size, char *data) const {
         return loop->event({.sys_fd = fd, .types = IOEvent::IN})
-            .then(loop->async([fd = fd, buffer, buf_size](auto) -> size_t {
-                if (buf_size == 0) {
-                    return 0;
-                }
-                // this wouldn't block because some event has definitely happened (either exceptional or not)
-                auto read_size = ::read(fd, buffer, buf_size);
+            .map([fd = fd, data, size](auto) -> size_t {
+                auto read_size = ::read(fd, data, size);
                 if (read_size < 0) {
-                    assertion_failed(strerror(errno));
+                    throw SystemError(std::string("read: ") + strerror(errno));
                 }
                 return read_size;
-            }));
+            });
+    }
+
+    Future<std::size_t> StreamFD::write(size_t size, const char *data) const {
+        return loop->event({.sys_fd = fd, .types = IOEvent::OUT})
+            .map([fd = fd, data, size](auto) -> size_t {
+                auto write_size = ::write(fd, data, size);
+                if (write_size < 0) {
+                    throw SystemError(std::string("write: ") + strerror(errno));
+                }
+                return write_size;
+            });
     }
 
     StreamFD::StreamFD(BasicEventLoop *loop, sys_t sys_fd) : FD(loop, sys_fd) {
     }
 
     Future<StreamSocketFD>
-    StreamSocketFD::connect(BasicEventLoop *loop, const std::string &hostname, const std::string &service) {
-        return loop->async_execute([loop, hostname, service] () -> StreamSocketFD {
+    StreamSocketFD::connect(BasicEventLoop *loop, const std::string &host, const std::string &service) {
+        return loop->async_execute([loop, host, service] () -> StreamSocketFD {
             addrinfo addr_hints = {
-                .ai_flags = 0,
+                .ai_flags = AI_NUMERICHOST | AI_NUMERICSERV,
                 .ai_family = AF_UNSPEC,
                 .ai_socktype = SOCK_STREAM,
                 .ai_protocol = 0,
                 .ai_addrlen = 0,
                 .ai_addr = nullptr,
                 .ai_canonname = nullptr,
-                .ai_next = nullptr};
+                .ai_next = nullptr
+            };
             addrinfo *addr_info = nullptr;
-
-            int res = getaddrinfo(hostname.c_str(), service.c_str(), &addr_hints, &addr_info);
-            if (res != 0) {
-                throw SystemError("name resolution for `" + hostname + ":" + service + "` failed: " + gai_strerror(res));
+            int res = getaddrinfo(host.c_str(), service.c_str(), &addr_hints, &addr_info);
+            if (res != 0 || !addr_info) {
+                throw SystemError(
+                    "host/service resolution for `"
+                    + host + ":" + service
+                    + "` failed: "
+                    + gai_strerror(res)
+                );
             }
 
-            std::string last_error = "no address resolved";
-            int fd = 0;
-            addrinfo *conn_addr = addr_info;
-            for (; conn_addr != nullptr; conn_addr = conn_addr->ai_next) {
-                fd = socket(conn_addr->ai_family, conn_addr->ai_socktype | SOCK_NONBLOCK, conn_addr->ai_protocol);
-                if (fd < 0) {
-                    last_error = std::string("socket: ") + strerror(errno);
-                    continue;
-                }
+            int fd = socket(addr_info->ai_family, addr_info->ai_socktype | SOCK_NONBLOCK, addr_info->ai_protocol);
+            if (fd < 0) {
+                freeaddrinfo(addr_info);
+                throw SystemError(std::string("socket: ") + strerror(errno));
+            }
 
-                int conn_res = ::connect(fd, conn_addr->ai_addr, conn_addr->ai_addrlen);
-                if (conn_res < 0) {
-                    if (errno == EINPROGRESS) {
-                        loop->await(loop->event({.sys_fd = fd, .types = IOEvent::OUT}));
-                        int err = 0;
-                        socklen_t err_len = sizeof err;
-                        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
-                            err = errno;
-                        }
-                        if (err) {
-                            last_error = std::string("connect/getsockopt: ") + strerror(err);
-                            close(fd);
-                            continue;
-                        }
-                    } else {
-                        last_error = std::string("connect: ") + strerror(errno);
-                        close(fd);
-                        continue;
-                    }
-                }
-
-                break;
+            if (::connect(fd, addr_info->ai_addr, addr_info->ai_addrlen) < 0 && errno != EINPROGRESS) {
+                freeaddrinfo(addr_info);
+                close(fd);
+                throw SystemError(std::string("connect: ") + strerror(errno));
             }
 
             freeaddrinfo(addr_info);
 
-            if (conn_addr == nullptr) {
-                throw SystemError("`" + hostname + ":" + service + "`: " + last_error);
+
+            loop->await(loop->event({.sys_fd = fd, .types = IOEvent::OUT}));
+            int err = 0;
+            socklen_t err_len = sizeof err;
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
+                close(fd);
+                throw SystemError(std::string("getsockopt: ") + strerror(errno));
+            }
+            if (err) {
+                close(fd);
+                throw SystemError(std::string("connect: ") + strerror(err));
             }
 
             return {loop, fd};
@@ -215,7 +209,7 @@ namespace AIO {
     StreamSocketFD::StreamSocketFD(StreamSocketFD &&other) noexcept : StreamFD(std::move(other)) {
     }
 
-    void StreamSocketFD::shutdown(bool read, bool write) {
+    void StreamSocketFD::shutdown(bool read, bool write) const {
         int how = 0;
         if (read && write) {
             how = SHUT_RDWR;

@@ -14,13 +14,13 @@ namespace AIO {
         Promise<Res> promise;
         AIO::bind(future, promise);
 
-        auto job = [fun = std::forward<Functor>(fun), args = std::tuple<Args...>(std::forward<Args>(args)...),
+        auto job = [fun = std::forward<Functor>(fun), args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
                     promise = std::move(promise)] mutable {
             try {
                 if constexpr (!std::is_void_v<Res>) {
-                    std::move(promise).fulfill(std::apply(fun, args));
+                    std::move(promise).fulfill(std::apply(fun, std::move(args)));
                 } else {
-                    std::apply(fun, args);
+                    std::apply(fun, std::move(args));
                     std::move(promise).fulfill();
                 }
             } catch (...) {
@@ -37,7 +37,8 @@ namespace AIO {
 
     template<typename Functor>
     auto BasicEventLoop::async(Functor &&fun) {
-        return [this, fun = std::forward<Functor>(fun)]<typename... Args>(Args &&...args) {
+        //                                                    TODO: return true-nodiscard functor (object of a class)
+        return [this, fun = std::forward<Functor>(fun)]<typename... Args>(Args &&...args) /* [[nodiscard]] */ {
             return this->async_execute(fun, std::forward<Args>(args)...);
         };
     }

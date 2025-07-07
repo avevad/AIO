@@ -175,6 +175,36 @@ namespace AIO {
     }
 
     template<FutureResult Res>
+    template<typename Functor, typename Res1>
+    Future<Res1> Future<Res>::map(Functor &&fun) && {
+        Future<Res1> future;
+        Promise<Res1> promise;
+        AIO::bind(promise, future);
+
+        auto consumer = [
+            promise = std::move(promise), fun = std::forward<Functor>(fun)
+        ] (const MaybeResult<Res> &maybe_res) mutable {
+            if (auto *res = std::get_if<WrappedResult<Res>>(&maybe_res)) {
+                try {
+                    if constexpr (std::is_void_v<Res1>) {
+                        fun(std::move(res->obj));
+                        std::move(promise).fulfill();
+                    } else {
+                        std::move(promise).fulfill(fun(std::move(res->obj)));
+                    }
+                } catch (...) {
+                    std::move(promise).fail(std::current_exception());
+                }
+            } else {
+                std::move(promise).fail(std::get<std::exception_ptr>(maybe_res));
+            }
+        };
+        std::move(*this).consume(std::move(consumer));
+
+        return future;
+    }
+
+    template<FutureResult Res>
     void Future<Res>::consume(typename Base::Consumer consumer) && {
         if (!Base::BoundBase::was_bound()) {
             assertion_failed("future was not bound to any promise");
@@ -209,6 +239,35 @@ namespace AIO {
                     std::move(promise).propagate(std::move(maybe_res1));
                 };
                 std::move(future1).consume(std::move(consumer1));
+            } else {
+                std::move(promise).fail(std::get<std::exception_ptr>(maybe_res));
+            }
+        };
+        std::move(*this).consume(std::move(consumer));
+
+        return future;
+    }
+
+    template<typename Functor, typename Res1>
+    Future<Res1> Future<void>::map(Functor &&fun) && {
+        Future<Res1> future;
+        Promise<Res1> promise;
+        AIO::bind(promise, future);
+
+        auto consumer = [
+            promise = std::move(promise), fun = std::forward<Functor>(fun)
+        ] (const MaybeResult<void> &maybe_res) mutable {
+            if (std::get_if<WrappedResult<void>>(&maybe_res)) {
+                try {
+                    if constexpr (std::is_void_v<Res1>) {
+                        fun();
+                        promise.fulfill();
+                    } else {
+                        promise.fulfill(fun());
+                    }
+                } catch (...) {
+                    std::move(promise).fail(std::current_exception());
+                }
             } else {
                 std::move(promise).fail(std::get<std::exception_ptr>(maybe_res));
             }
