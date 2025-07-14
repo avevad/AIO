@@ -1,25 +1,92 @@
 #pragma once
 
+#include "AIOxx/event_loop.hpp"
 #include "AIOxx/fd.hpp"
 
 namespace AIO {
+
+    template<std::derived_from<StreamSocketFD> BaseFD>
+    BufferedStreamFD<BaseFD>::BufferedStreamFD(BaseFD base) : BaseFD(std::move(base)) {
+    }
+
     template<std::derived_from<StreamSocketFD> BaseFD>
     Future<std::size_t> BufferedStreamFD<BaseFD>::read(size_t size, char *data) const {
-        return BaseFD::loop->async_execute([this, size, data] -> size_t {
-            size_t read_total = std::min(size, i_sz);
-            if (read_total) {
-                std::copy_n(i_buf.get(), read_total, data);
-                std::copy_n(i_buf.get() + read_total, i_sz - read_total, i_buf.get());
-                i_sz -= read_total;
-            }
-            while (read_total != size) {
-                size_t read_size = BaseFD::loop->await(BaseFD::read(size - read_total, data + read_total));
-                if (read_size == 0) {
+        return event_loop()->async_execute([this, size, data] mutable -> size_t {
+            while (i_sz < size) {
+                size_t read_limit = i_beg + i_sz < i_cap ? i_cap - (i_beg + i_sz) : i_cap - i_sz;
+                size_t read_pos = i_beg + i_sz < i_cap ? i_beg + i_sz : i_beg + i_sz - i_cap;
+                size_t read_amount = event_loop()->await(read_some(read_limit, i_buf.get() + read_pos));
+                if (read_amount == 0) {
+                    size = i_sz;
                     break;
                 }
-                read_total += read_size;
+                i_sz += read_amount;
             }
-            return read_total;
+            if (i_beg + size >= i_cap) {
+                size_t n1 = i_cap - i_beg;
+                size_t n2 = size - n1;
+                std::copy_n(i_buf.get() + i_beg, n1, data);
+                std::copy_n(i_buf.get(), n2, data + n1);
+                i_beg = n2;
+                i_sz -= size;
+            } else {
+                std::copy_n(i_buf.get() + i_beg, size, data);
+                i_beg += size;
+                i_sz -= size;
+            }
+            return size;
+        });
+    }
+
+    template<std::derived_from<StreamSocketFD> BaseFD>
+    Future<std::optional<char>> BufferedStreamFD<BaseFD>::read_byte() const {
+        Future<bool> byte_ready;
+        if (i_sz == 0) {
+            i_beg = 0;
+            byte_ready = read_some(i_cap, i_buf.get()).map([this](size_t size) -> bool {
+                if (size == 0) {
+                    return false;
+                }
+                i_sz += size;
+                return true;
+            });
+        } else {
+            Promise<bool> promise;
+            AIO::bind(byte_ready, promise);
+            std::move(promise).fulfill(true);
+        }
+        return std::move(byte_ready).map([this](bool has_byte) -> std::optional<char> {
+            if (!has_byte) {
+                return std::nullopt;
+            }
+            char byte = i_buf.get()[i_beg];
+            i_beg++;
+            i_sz--;
+            if (i_beg == i_cap) {
+                i_beg = 0;
+            }
+            return byte;
+        });
+    }
+
+    template<std::derived_from<StreamSocketFD> BaseFD>
+    Future<std::string> BufferedStreamFD<BaseFD>::read_until(char delim, size_t limit) {
+        return event_loop()->async_execute([this, delim, limit] () -> std::string {
+            std::string result;
+            while (true) {
+                if (result.size() >= limit) {
+                    break;
+                }
+                if (!result.empty() && result.back() == delim) {
+                    break;
+                }
+                auto maybe_byte = event_loop()->await(read_byte());
+                if (!maybe_byte.has_value()) {
+                    break;
+                }
+                result += maybe_byte.value();
+            }
+            return result;
         });
     }
 
@@ -47,27 +114,6 @@ namespace AIO {
     }
 
     template<std::derived_from<StreamSocketFD> BaseFD>
-    std::string BufferedStreamFD<BaseFD>::read_until(char delim, size_t) {
-        std::string result;
-        while (true) {
-            std::string_view buf_view(i_buf.get(), i_sz);
-            size_t delim_pos = buf_view.find(delim);
-            if (delim_pos == std::string_view::npos) {
-                result += buf_view;
-                i_cap = BaseFD::loop->await(BaseFD::read(i_cap, i_buf.get()));
-                if (i_cap == 0) {
-                    break;
-                }
-            } else {
-                result += buf_view.substr(0, delim_pos + 1);
-                std::copy_n(i_buf.get() + delim_pos + 1, i_sz - delim_pos - 1, i_buf.get());
-                i_sz -= delim_pos + 1;
-            }
-        }
-        return result;
-    }
-
-    template<std::derived_from<StreamSocketFD> BaseFD>
     Future<bool> BufferedStreamFD<BaseFD>::flush() const {
         return BaseFD::loop->async_execute([this] -> bool {
             size_t write_total = 0;
@@ -81,4 +127,20 @@ namespace AIO {
             return true;
         });
     }
+
+    template<std::derived_from<StreamSocketFD> BaseFD>
+    Future<std::size_t> BufferedStreamFD<BaseFD>::read_some(size_t size, char *data) const {
+        return BaseFD::read(size, data);
+    }
+
+    template<std::derived_from<StreamSocketFD> BaseFD>
+    Future<std::size_t> BufferedStreamFD<BaseFD>::write_some(size_t size, const char *data) const {
+        return BaseFD::write(size, data);
+    }
+
+    template<std::derived_from<StreamSocketFD> BaseFD>
+    BasicEventLoop *BufferedStreamFD<BaseFD>::event_loop() const {
+        return BaseFD::loop;
+    }
+
 } // namespace AIO

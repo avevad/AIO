@@ -71,6 +71,13 @@ namespace AIO {
             throw SystemError(std::string("socket: ") + strerror(errno));
         }
 
+        int yes = 1;
+        if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
+            freeaddrinfo(addr_info);
+            close(fd);
+            throw SystemError(std::string("setsockopt: ") + strerror(errno));
+        }
+
         if (::bind(fd, addr_info->ai_addr, addr_info->ai_addrlen) < 0) {
             freeaddrinfo(addr_info);
             close(fd);
@@ -92,8 +99,7 @@ namespace AIO {
     }
 
     Future<StreamSocketFD> StreamServerFD::accept() {
-        return loop->async_execute([this]() -> StreamSocketFD {
-            loop->await(loop->event({.sys_fd = sys_fd(), .types = IOEvent::IN}));
+        return loop->event({.sys_fd = sys_fd(), .types = IOEvent::IN}).map([this](auto) -> StreamSocketFD {
             sockaddr addr{};
             socklen_t len{};
             int fd = ::accept(sys_fd(), &addr, &len);
@@ -153,44 +159,42 @@ namespace AIO {
 
     Future<StreamSocketFD>
     StreamSocketFD::connect(BasicEventLoop *loop, const std::string &host, const std::string &service) {
-        return loop->async_execute([loop, host, service] () -> StreamSocketFD {
-            addrinfo addr_hints = {
-                .ai_flags = AI_NUMERICHOST | AI_NUMERICSERV,
-                .ai_family = AF_UNSPEC,
-                .ai_socktype = SOCK_STREAM,
-                .ai_protocol = 0,
-                .ai_addrlen = 0,
-                .ai_addr = nullptr,
-                .ai_canonname = nullptr,
-                .ai_next = nullptr
-            };
-            addrinfo *addr_info = nullptr;
-            int res = getaddrinfo(host.c_str(), service.c_str(), &addr_hints, &addr_info);
-            if (res != 0 || !addr_info) {
-                throw SystemError(
-                    "host/service resolution for `"
-                    + host + ":" + service
-                    + "` failed: "
-                    + gai_strerror(res)
-                );
-            }
+        addrinfo addr_hints = {
+            .ai_flags = AI_NUMERICHOST | AI_NUMERICSERV,
+            .ai_family = AF_UNSPEC,
+            .ai_socktype = SOCK_STREAM,
+            .ai_protocol = 0,
+            .ai_addrlen = 0,
+            .ai_addr = nullptr,
+            .ai_canonname = nullptr,
+            .ai_next = nullptr
+        };
+        addrinfo *addr_info = nullptr;
+        int res = getaddrinfo(host.c_str(), service.c_str(), &addr_hints, &addr_info);
+        if (res != 0 || !addr_info) {
+            throw SystemError(
+                "host/service resolution for `"
+                + host + ":" + service
+                + "` failed: "
+                + gai_strerror(res)
+            );
+        }
 
-            int fd = socket(addr_info->ai_family, addr_info->ai_socktype | SOCK_NONBLOCK, addr_info->ai_protocol);
-            if (fd < 0) {
-                freeaddrinfo(addr_info);
-                throw SystemError(std::string("socket: ") + strerror(errno));
-            }
-
-            if (::connect(fd, addr_info->ai_addr, addr_info->ai_addrlen) < 0 && errno != EINPROGRESS) {
-                freeaddrinfo(addr_info);
-                close(fd);
-                throw SystemError(std::string("connect: ") + strerror(errno));
-            }
-
+        int fd = socket(addr_info->ai_family, addr_info->ai_socktype | SOCK_NONBLOCK, addr_info->ai_protocol);
+        if (fd < 0) {
             freeaddrinfo(addr_info);
+            throw SystemError(std::string("socket: ") + strerror(errno));
+        }
 
+        if (::connect(fd, addr_info->ai_addr, addr_info->ai_addrlen) < 0 && errno != EINPROGRESS) {
+            freeaddrinfo(addr_info);
+            close(fd);
+            throw SystemError(std::string("connect: ") + strerror(errno));
+        }
 
-            loop->await(loop->event({.sys_fd = fd, .types = IOEvent::OUT}));
+        freeaddrinfo(addr_info);
+
+        return loop->event({.sys_fd = fd, .types = IOEvent::OUT}).map([loop, fd] (auto) -> StreamSocketFD {
             int err = 0;
             socklen_t err_len = sizeof err;
             if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {

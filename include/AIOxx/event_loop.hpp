@@ -3,6 +3,7 @@
 #include "coroutine.hpp"
 #include "future.hpp"
 #include "io.hpp"
+#include "fd.hpp"
 #include "util.hpp"
 
 #include <chrono>
