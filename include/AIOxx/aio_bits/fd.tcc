@@ -112,6 +112,14 @@ namespace AIO {
             return write_total;
         });
     }
+    template<std::derived_from<StreamSocketFD> BaseFD>
+    Future<void> BufferedStreamFD<BaseFD>::write_string(std::string_view str) const {
+        return write(str.size(), str.data()).map([str] (size_t written) {
+            if (written != str.size()) {
+                throw SystemError("end of stream");
+            }
+        });
+    }
 
     template<std::derived_from<StreamSocketFD> BaseFD>
     Future<bool> BufferedStreamFD<BaseFD>::flush() const {

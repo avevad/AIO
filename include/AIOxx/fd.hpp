@@ -89,6 +89,7 @@ namespace AIO {
         Future<std::string> read_until(char delim, size_t limit = std::numeric_limits<size_t>::max());
 
         Future<std::size_t> write(size_t size, const char *data) const;
+        Future<void> write_string(std::string_view str) const;
 
         [[nodiscard]] Future<bool> flush() const;
 
