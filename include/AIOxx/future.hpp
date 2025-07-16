@@ -7,7 +7,7 @@
 #include "util.hpp"
 
 namespace AIO {
-    class SimpleEventLoop;
+    class BasicEventLoop;
 
     template<typename Res>
     concept FutureResult = !std::is_reference_v<Res>;
@@ -62,7 +62,7 @@ namespace AIO {
 
             friend Promise<Res>;
             friend PromiseBase<Res, Promise<Res>>;
-            friend SimpleEventLoop;
+            friend BasicEventLoop;
             friend Derived;
 
             bool awaited = false;
@@ -92,7 +92,7 @@ namespace AIO {
 
             friend Future<Res>;
             friend FutureBase<Res, Future<Res>>;
-            friend SimpleEventLoop;
+            friend BasicEventLoop;
             friend Derived;
 
             bool fulfilled = false;
@@ -113,6 +113,9 @@ namespace AIO {
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor, Res>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
 
+        template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Res>>
+        Future<Res1> map(Functor &&fun) &&;
+
     private:
         friend Base;
     };
@@ -128,6 +131,9 @@ namespace AIO {
 
         template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor>::Result>
         Future<Res1> then(AsyncFunctor &&fun) &&;
+
+        template<typename Functor, typename Res1 = std::invoke_result_t<Functor>>
+        Future<Res1> map(Functor &&fun) &&;
 
     private:
         friend Base;

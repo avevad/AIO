@@ -1,6 +1,7 @@
 #include "AIOxx/io.hpp"
 
 #include "AIOxx/util.hpp"
+#include "AIOxx/fd.hpp"
 
 #include <cstring>
 #include <sys/epoll.h>

@@ -7,20 +7,20 @@
 namespace AIO {
 
     template<typename Functor, typename... Args>
-    Future<std::invoke_result_t<Functor, Args...>> SimpleEventLoop::async_execute(Functor &&fun, Args &&...args) {
+    Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::async_execute(Functor &&fun, Args &&...args) {
         using Res = std::invoke_result_t<Functor, Args...>;
 
         Future<Res> future;
         Promise<Res> promise;
         AIO::bind(future, promise);
 
-        auto job = [fun = std::forward<Functor>(fun), args = std::tuple<Args...>(std::forward<Args>(args)...),
+        auto job = [fun = std::forward<Functor>(fun), args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
                     promise = std::move(promise)] mutable {
             try {
                 if constexpr (!std::is_void_v<Res>) {
-                    std::move(promise).fulfill(std::apply(fun, args));
+                    std::move(promise).fulfill(std::apply(fun, std::move(args)));
                 } else {
-                    std::apply(fun, args);
+                    std::apply(fun, std::move(args));
                     std::move(promise).fulfill();
                 }
             } catch (...) {
@@ -36,14 +36,15 @@ namespace AIO {
     }
 
     template<typename Functor>
-    auto SimpleEventLoop::async(Functor &&fun) {
-        return [this, fun = std::forward<Functor>(fun)]<typename... Args>(Args &&...args) {
+    auto BasicEventLoop::async(Functor &&fun) {
+        //                                                    TODO: return true-nodiscard functor (object of a class)
+        return [this, fun = std::forward<Functor>(fun)]<typename... Args>(Args &&...args) /* [[nodiscard]] */ {
             return this->async_execute(fun, std::forward<Args>(args)...);
         };
     }
 
     template<typename Res>
-    Res SimpleEventLoop::await(Future<Res> future) {
+    Res BasicEventLoop::await(Future<Res> future) {
         if (!current_coro.has_value()) {
             assertion_failed("attempt to await() outside of event loop");
         }
@@ -54,7 +55,7 @@ namespace AIO {
         std::exception_ptr error = nullptr;
         auto consumer = [this, task = std::move(task), &result, &error](MaybeResult<Res> maybe_res) mutable {
             if (auto *res = std::get_if<WrappedResult<Res>>(&maybe_res)) {
-                result = std::move(*res);
+                result.emplace(std::move(*res));
             } else {
                 error = std::get<std::exception_ptr>(maybe_res);
             }
@@ -71,7 +72,7 @@ namespace AIO {
         return result.value().move_out();
     }
     template<typename Rep, typename Period>
-    Future<void> SimpleEventLoop::timeout(const std::chrono::duration<Rep, Period> &duration) {
+    Future<void> BasicEventLoop::timeout(const std::chrono::duration<Rep, Period> &duration) {
         return deadline(
             std::chrono::steady_clock::now() +
             std::chrono::duration_cast<
@@ -80,14 +81,14 @@ namespace AIO {
     }
 
     template<typename Functor>
-    SimpleEventLoop::CoroutineHolder::CoroutineHolder(Functor fun) : wrapped(std::move(fun)) {
+    BasicEventLoop::CoroutineHolder::CoroutineHolder(Functor fun) : wrapped(std::move(fun)) {
     }
 
-    inline bool SimpleEventLoop::TimedTask::operator<(const TimedTask &task1) const {
+    inline bool BasicEventLoop::TimedTask::operator<(const TimedTask &task1) const {
         return when < task1.when;
     }
 
-    inline void SimpleEventLoop::do_coroutine_step(std::shared_ptr<CoroutineHolder> coro) {
+    inline void BasicEventLoop::do_coroutine_step(std::shared_ptr<CoroutineHolder> coro) {
         if (current_coro.has_value()) {
             assertion_failed("recursive do_coroutine_step() call");
         }
@@ -96,8 +97,8 @@ namespace AIO {
         current_coro = std::nullopt;
     }
 
-    inline void run(const std::function<void(SimpleEventLoop &)> &main_function) {
-        SimpleEventLoop loop;
+    inline void run(const std::function<void(BasicEventLoop &)> &main_function) {
+        BasicEventLoop loop;
         auto loop_execute = loop.async([&loop, &main_function] { main_function(loop); });
         auto loop_stop = loop.async([&loop] { loop.stop(); });
 
@@ -105,12 +106,12 @@ namespace AIO {
         loop.run();
     }
 
-    inline SimpleEventLoop::SimpleEventLoop()
+    inline BasicEventLoop::BasicEventLoop()
         : std_in(StreamFD::steal_system(this, 0)), std_out(StreamFD::steal_system(this, 1)),
           std_err(StreamFD::steal_system(this, 2)) {
     }
 
-    inline void SimpleEventLoop::yield() {
+    inline void BasicEventLoop::yield() {
         if (!current_coro) {
             assertion_failed("attempt to yield outside the event loop");
         }
@@ -119,13 +120,13 @@ namespace AIO {
         current_coro.value()->wrapped.yield();
     }
 
-    inline void SimpleEventLoop::stop() {
+    inline void BasicEventLoop::stop() {
         stopped = true;
         yield();
         assertion_failed("event loop stop trap");
     }
 
-    inline Future<void> SimpleEventLoop::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
+    inline Future<void> BasicEventLoop::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
         Future<void> future;
         Promise<void> promise;
         AIO::bind(future, promise);
@@ -136,7 +137,7 @@ namespace AIO {
         return future;
     }
 
-    inline Future<IOEvent::Types> SimpleEventLoop::event(IOEvent event) {
+    inline Future<IOEvent::Types> BasicEventLoop::event(IOEvent event) {
         Future<IOEvent::Types> future;
         Promise<IOEvent::Types> promise;
         AIO::bind(future, promise);
@@ -162,7 +163,7 @@ namespace AIO {
         return future;
     }
 
-    inline void SimpleEventLoop::run() {
+    inline void BasicEventLoop::run() {
         try {
             while (!stopped) {
                 // Check regular tasks that are available unconditionally
@@ -208,7 +209,7 @@ namespace AIO {
         }
     }
 
-    inline SimpleEventLoop::~SimpleEventLoop() {
+    inline BasicEventLoop::~BasicEventLoop() {
         std::move(const_cast<StreamFD &>(std_in)).release_to_system();
         std::move(const_cast<StreamFD &>(std_out)).release_to_system();
         std::move(const_cast<StreamFD &>(std_err)).release_to_system();

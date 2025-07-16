@@ -99,7 +99,7 @@ void sample_event_loop() {
     using namespace std::chrono_literals;
     std::cout << "----------Event loop----------" << std::endl;
 
-    AIO::run([](AIO::SimpleEventLoop &loop) -> void {
+    AIO::run([](AIO::BasicEventLoop &loop) -> void {
         auto calculate = loop.async([&loop] -> int {
             std::cout << "Calculating the number..." << std::endl;
             loop.await(loop.timeout(1s));
