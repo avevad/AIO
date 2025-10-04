@@ -5,11 +5,11 @@
 
 namespace AIO {
 
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     BufferedStreamFD<BaseFD>::BufferedStreamFD(BaseFD base) : BaseFD(std::move(base)) {
     }
 
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     Future<std::size_t> BufferedStreamFD<BaseFD>::read(size_t size, char *data) const {
         return event_loop()->async_execute([this, size, data] mutable -> size_t {
             while (i_sz < size) {
@@ -38,7 +38,7 @@ namespace AIO {
         });
     }
 
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     Future<std::optional<char>> BufferedStreamFD<BaseFD>::read_byte() const {
         Future<bool> byte_ready;
         if (i_sz == 0) {
@@ -69,7 +69,7 @@ namespace AIO {
         });
     }
 
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     Future<std::string> BufferedStreamFD<BaseFD>::read_until(char delim, size_t limit) {
         return event_loop()->async_execute([this, delim, limit] () -> std::string {
             std::string result;
@@ -90,7 +90,7 @@ namespace AIO {
         });
     }
 
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     Future<std::size_t> BufferedStreamFD<BaseFD>::write(size_t size, const char *data) const {
         return BaseFD::loop->async_execute([this, size, data] -> size_t {
             if (o_sz + size <= o_cap) {
@@ -112,7 +112,7 @@ namespace AIO {
             return write_total;
         });
     }
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     Future<void> BufferedStreamFD<BaseFD>::write_string(std::string_view str) const {
         return write(str.size(), str.data()).map([str] (size_t written) {
             if (written != str.size()) {
@@ -121,7 +121,7 @@ namespace AIO {
         });
     }
 
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     Future<bool> BufferedStreamFD<BaseFD>::flush() const {
         return BaseFD::loop->async_execute([this] -> bool {
             size_t write_total = 0;
@@ -136,17 +136,17 @@ namespace AIO {
         });
     }
 
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     Future<std::size_t> BufferedStreamFD<BaseFD>::read_some(size_t size, char *data) const {
         return BaseFD::read(size, data);
     }
 
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     Future<std::size_t> BufferedStreamFD<BaseFD>::write_some(size_t size, const char *data) const {
         return BaseFD::write(size, data);
     }
 
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     BasicEventLoop *BufferedStreamFD<BaseFD>::event_loop() const {
         return BaseFD::loop;
     }
