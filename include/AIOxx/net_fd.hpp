@@ -15,7 +15,7 @@ namespace AIO {
         ~StreamSocketFD();
 
     private:
-        StreamSocketFD(BasicEventLoop &loop, sys_t sys_fd);
+        StreamSocketFD(BasicEventLoop &loop, SystemFD sys_fd);
 
         friend class StreamServerFD;
     };

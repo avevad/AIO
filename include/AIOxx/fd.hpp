@@ -15,7 +15,7 @@ namespace AIO {
 
     class FD {
     public:
-        using sys_t = IOEvent::sys_fd_t;
+        enum Direction { IN, OUT };
 
         FD(const FD &) = delete;
         FD &operator=(const FD &) = delete;
@@ -23,22 +23,35 @@ namespace AIO {
         FD(FD &&other) noexcept;
         FD &operator=(FD &&other) noexcept;
 
-        [[nodiscard]] sys_t sys_fd() const;
-        sys_t release_to_system() &&;
+        [[nodiscard]] Future<void> event(Direction direction) const;
 
+        [[nodiscard]] SystemFD release_to_system() &&;
         ~FD();
 
     protected:
-        FD(BasicEventLoop &loop, sys_t sys_fd);
+        [[nodiscard]] SystemFD get_sys_fd() const;
+        [[nodiscard]] BasicEventLoop &get_event_loop() const;
 
-        sys_t fd;
-        BasicEventLoop &loop;
+        FD(BasicEventLoop &loop, SystemFD sys_fd);
+
+    private:
+        struct State {
+            BasicEventLoop &loop;
+            IOTasksQueue::Handle io_handle;
+            std::optional<Promise<void>> in_promise = std::nullopt;
+            std::optional<Promise<void>> out_promise = std::nullopt;
+        };
+
+        void io_callback(IOTasksQueue::EventTypes event_types);
+
+        SystemFD fd;
+        std::unique_ptr<State> state;
     };
 
     class StreamFD : public FD {
     public:
         static StreamFD open(BasicEventLoop &loop, const std::filesystem::path &path, std::ios_base::openmode mode);
-        static StreamFD steal_system(BasicEventLoop &loop, FD::sys_t sys_fd);
+        static StreamFD steal_from_system(BasicEventLoop &loop, SystemFD sys_fd);
 
         StreamFD(StreamFD &&other) noexcept;
         using FD::operator=;
@@ -47,7 +60,7 @@ namespace AIO {
         Future<std::size_t> write(size_t size, const char *data) const;
 
     protected:
-        StreamFD(BasicEventLoop &loop, sys_t sys_fd);
+        StreamFD(BasicEventLoop &loop, SystemFD sys_fd);
     };
 
     template<std::derived_from<StreamFD> BaseFD>

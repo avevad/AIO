@@ -14,22 +14,17 @@ namespace AIO {
             .ai_addrlen = 0,
             .ai_addr = nullptr,
             .ai_canonname = nullptr,
-            .ai_next = nullptr
-        };
+            .ai_next = nullptr};
         addrinfo *addr_info = nullptr;
         int res = getaddrinfo(host.c_str(), service.c_str(), &addr_hints, &addr_info);
         if (res != 0 || !addr_info) {
             throw SystemError(
-                "host/service resolution for `"
-                + host + ":" + service
-                + "` failed: "
-                + gai_strerror(res)
-            );
+                "host/service resolution for `" + host + ":" + service + "` failed: " + gai_strerror(res));
         }
         return addr_info;
     }
 
-    FD::sys_t make_server_socket(const std::string &host, const std::string &service) {
+    SystemFD make_server_socket(const std::string &host, const std::string &service) {
         addrinfo *addr_info = parse_host_service_pair(host, service, true);
 
         int fd = socket(addr_info->ai_family, addr_info->ai_socktype, addr_info->ai_protocol);
@@ -62,66 +57,19 @@ namespace AIO {
     }
 
     StreamServerFD::StreamServerFD(BasicEventLoop &loop, const std::string &host, const std::string &service)
-    : FD(loop, make_server_socket(host, service)) {
+        : FD(loop, make_server_socket(host, service)) {
     }
 
     Future<StreamSocketFD> StreamServerFD::accept() {
-        return loop.event({.sys_fd = sys_fd(), .types = IOEvent::IN}).map([this](auto) -> StreamSocketFD {
+        return event(IN).map([this] -> StreamSocketFD {
             sockaddr addr{};
             socklen_t len{};
-            int fd = ::accept(sys_fd(), &addr, &len);
+            int fd = ::accept(get_sys_fd(), &addr, &len);
             if (fd < 0) {
                 throw SystemError(std::string("accept: ") + strerror(errno));
             }
-            return {loop, fd};
+            return {get_event_loop(), fd};
         });
-    }
-
-    StreamFD StreamFD::open(BasicEventLoop &loop, const std::filesystem::path &path, std::ios_base::openmode mode) {
-        int flags = 0;
-        if (mode & std::ios::in) {
-            flags = O_RDONLY;
-        }
-        if (mode & std::ios::out) {
-            flags = O_WRONLY;
-        }
-        if (mode & std::ios::in && mode & std::ios::out) {
-            flags = O_RDWR;
-        }
-        sys_t sys_fd = ::open(path.c_str(), flags);
-        return {loop, sys_fd};
-    }
-
-    StreamFD StreamFD::steal_system(BasicEventLoop &loop, FD::sys_t sys_fd) {
-        return {loop, sys_fd};
-    }
-
-    StreamFD::StreamFD(StreamFD &&other) noexcept : FD(std::move(other)) {
-    }
-
-    Future<std::size_t> StreamFD::read(size_t size, char *data) const {
-        return loop.event({.sys_fd = fd, .types = IOEvent::IN})
-            .map([fd = fd, data, size](auto) -> size_t {
-                auto read_size = ::read(fd, data, size);
-                if (read_size < 0) {
-                    throw SystemError(std::string("read: ") + strerror(errno));
-                }
-                return read_size;
-            });
-    }
-
-    Future<std::size_t> StreamFD::write(size_t size, const char *data) const {
-        return loop.event({.sys_fd = fd, .types = IOEvent::OUT})
-            .map([fd = fd, data, size](auto) -> size_t {
-                auto write_size = ::write(fd, data, size);
-                if (write_size < 0) {
-                    throw SystemError(std::string("write: ") + strerror(errno));
-                }
-                return write_size;
-            });
-    }
-
-    StreamFD::StreamFD(BasicEventLoop &loop, sys_t sys_fd) : FD(loop, sys_fd) {
     }
 
     Future<StreamSocketFD>
@@ -142,19 +90,21 @@ namespace AIO {
 
         freeaddrinfo(addr_info);
 
-        return loop.event({.sys_fd = fd, .types = IOEvent::OUT}).map([&loop, fd] (auto) -> StreamSocketFD {
+        StreamSocketFD socket_fd(loop, fd);
+        auto connected = socket_fd.event(OUT);
+        return std::move(connected).map([socket_fd = std::move(socket_fd)] mutable -> StreamSocketFD {
             int err = 0;
             socklen_t err_len = sizeof err;
-            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
-                close(fd);
+            if (getsockopt(socket_fd.get_sys_fd(), SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
+                close(socket_fd.get_sys_fd());
                 throw SystemError(std::string("getsockopt: ") + strerror(errno));
             }
             if (err) {
-                close(fd);
+                close(socket_fd.get_sys_fd());
                 throw SystemError(std::string("connect: ") + strerror(err));
             }
 
-            return {loop, fd};
+            return std::move(socket_fd);
         });
     }
 
@@ -172,18 +122,18 @@ namespace AIO {
         } else {
             assertion_failed("invalid shutdown mode");
         }
-        ::shutdown(sys_fd(), how);
+        ::shutdown(get_sys_fd(), how);
     }
 
     StreamSocketFD::~StreamSocketFD() {
-        if (fd != -1) {
+        if (get_sys_fd() != -1) {
             shutdown();
         }
     }
 
-    StreamSocketFD::StreamSocketFD(BasicEventLoop &loop, sys_t sys_fd) : StreamFD(loop, sys_fd) {
+    StreamSocketFD::StreamSocketFD(BasicEventLoop &loop, SystemFD sys_fd) : StreamFD(loop, sys_fd) {
     }
 
     StreamServerFD::StreamServerFD(StreamServerFD &&other) noexcept : FD(std::move(other)) {
     }
-}
+} // namespace AIO

@@ -14,7 +14,8 @@ namespace AIO {
         Promise<Res> promise;
         AIO::bind(future, promise);
 
-        auto job = [fun = std::forward<Functor>(fun), args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
+        auto job = [fun = std::forward<Functor>(fun),
+                    args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
                     promise = std::move(promise)] mutable {
             try {
                 if constexpr (!std::is_void_v<Res>) {
@@ -107,8 +108,8 @@ namespace AIO {
     }
 
     inline BasicEventLoop::BasicEventLoop()
-        : std_in(StreamFD::steal_system(*this, 0)), std_out(StreamFD::steal_system(*this, 1)),
-          std_err(StreamFD::steal_system(*this, 2)) {
+        : std_in(StreamFD::steal_from_system(*this, 0)), std_out(StreamFD::steal_from_system(*this, 1)),
+          std_err(StreamFD::steal_from_system(*this, 2)) {
     }
 
     inline void BasicEventLoop::yield() {
@@ -137,34 +138,13 @@ namespace AIO {
         return future;
     }
 
-    inline Future<IOEvent::Types> BasicEventLoop::event(IOEvent event) {
-        Future<IOEvent::Types> future;
-        Promise<IOEvent::Types> promise;
-        AIO::bind(future, promise);
-
-        pending_io_tasks.push_back({
-            .iter = pending_io_tasks.end() /* stub */, .event = event, .callback = [](auto) {} /* stub */
-        });
-        auto iter = --pending_io_tasks.end();
-        auto *pending_task = &*iter;
-
-        IOEvent::Callback callback = [this, promise = std::move(promise),
-                                      pending_task](IOEvent::Types event_types) mutable {
-            std::move(promise).fulfill(event_types);
-            io_queue.deregister_event(pending_task->event.sys_fd);
-            pending_io_tasks.erase(pending_task->iter);
-        };
-
-        pending_task->iter = iter;
-        pending_task->callback = std::move(callback);
-
-        io_queue.register_event(event, &pending_task->callback, true);
-
-        return future;
+    inline IOTasksQueue::Handle BasicEventLoop::register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback) {
+        return pending_io_tasks.push(fd, std::move(callback));
     }
 
     inline void BasicEventLoop::run() {
         try {
+            // TODO: check scheduling order, something seems a bit off here
             while (!stopped) {
                 // Check regular tasks that are available unconditionally
                 if (!pending_tasks.empty()) {
@@ -183,13 +163,16 @@ namespace AIO {
                 }
 
                 // Check I/O tasks (which would probably block)
-                if (!pending_io_tasks.empty()) {
+                if (!pending_io_tasks.is_empty()) {
                     std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline = std::nullopt;
                     if (!pending_timed_tasks.empty()) {
                         deadline = pending_timed_tasks.begin()->when;
                     }
-                    io_queue.poll_event(deadline);
-                    continue;
+                    auto maybe_task = pending_io_tasks.poll(deadline);
+                    if (maybe_task.has_value()) {
+                        maybe_task.value()();
+                        continue;
+                    }
                 }
 
                 // Check timed tasks (which would probably block)
@@ -210,9 +193,9 @@ namespace AIO {
     }
 
     inline BasicEventLoop::~BasicEventLoop() {
-        std::move(const_cast<StreamFD &>(std_in)).release_to_system();
-        std::move(const_cast<StreamFD &>(std_out)).release_to_system();
-        std::move(const_cast<StreamFD &>(std_err)).release_to_system();
+        (void) std::move(const_cast<StreamFD &>(std_in)).release_to_system();
+        (void) std::move(const_cast<StreamFD &>(std_out)).release_to_system();
+        (void) std::move(const_cast<StreamFD &>(std_err)).release_to_system();
     }
 
 } // namespace AIO

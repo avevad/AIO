@@ -261,9 +261,9 @@ namespace AIO {
                 try {
                     if constexpr (std::is_void_v<Res1>) {
                         fun();
-                        promise.fulfill();
+                        std::move(promise).fulfill();
                     } else {
-                        promise.fulfill(fun());
+                        std::move(promise).fulfill(fun());
                     }
                 } catch (...) {
                     std::move(promise).fail(std::current_exception());
