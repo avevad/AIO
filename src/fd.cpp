@@ -49,28 +49,28 @@ namespace AIO {
         Promise<void> promise;
         bind(future, promise);
         promise_slot = std::move(promise);
-        state->io_handle.update(
+        state->io_handle.value().update(
             (state->in_promise.has_value() ? IOTasksQueue::IN : 0) |
             (state->out_promise.has_value() ? IOTasksQueue::OUT : 0));
         return future;
     }
 
     FD::FD(BasicEventLoop &loop, SystemFD sys_fd) : fd(sys_fd), state(nullptr) {
-        state = std::make_unique<State>(loop, loop.register_system_fd(fd, [this](auto e) { io_callback(e); }));
+        state = std::make_unique<State>(loop, std::nullopt);
+        state->io_handle.emplace(loop.register_system_fd(fd, [state = state.get()](auto e) { state->io_callback(e); }));
     }
 
-    void FD::io_callback(IOTasksQueue::EventTypes event_types) {
-        if (event_types & IOTasksQueue::IN && state->in_promise.has_value()) {
-            std::move(state->in_promise.value()).fulfill();
-            state->in_promise.reset();
+    void FD::State::io_callback(IOTasksQueue::EventTypes event_types) {
+        if (event_types & IOTasksQueue::IN && in_promise.has_value()) {
+            std::move(in_promise.value()).fulfill();
+            in_promise.reset();
         }
-        if (event_types & IOTasksQueue::OUT && state->in_promise.has_value()) {
-            std::move(state->out_promise.value()).fulfill();
-            state->out_promise.reset();
+        if (event_types & IOTasksQueue::OUT && in_promise.has_value()) {
+            std::move(out_promise.value()).fulfill();
+            out_promise.reset();
         }
-        state->io_handle.update(
-            (state->in_promise.has_value() ? IOTasksQueue::IN : 0) |
-            (state->out_promise.has_value() ? IOTasksQueue::OUT : 0));
+        io_handle.value().update(
+            (in_promise.has_value() ? IOTasksQueue::IN : 0) | (out_promise.has_value() ? IOTasksQueue::OUT : 0));
     }
 
     StreamFD StreamFD::open(BasicEventLoop &loop, const std::filesystem::path &path, std::ios_base::openmode mode) {

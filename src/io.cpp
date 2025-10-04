@@ -96,7 +96,9 @@ namespace AIO {
             if (ep_evt.events & EPOLLHUP) {
                 types |= HUP;
             }
-            return [callback = static_cast<TaskCallback *>(ep_evt.data.ptr), types] { (*callback)(types); };
+            return [callback = static_cast<TaskCallback *>(ep_evt.data.ptr), types] {
+                (*callback)(types);
+            };
         }
         return std::nullopt;
     }

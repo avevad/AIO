@@ -38,8 +38,8 @@ namespace AIO {
 
     template<typename Functor>
     auto BasicEventLoop::async(Functor &&fun) {
-        //                                                    TODO: return true-nodiscard functor (object of a class)
         return [this, fun = std::forward<Functor>(fun)]<typename... Args>(Args &&...args) /* [[nodiscard]] */ {
+            // TODO: use true-nodiscard functor (object of a class) ------------------------------^
             return this->async_execute(fun, std::forward<Args>(args)...);
         };
     }

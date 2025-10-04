@@ -37,12 +37,12 @@ namespace AIO {
     private:
         struct State {
             BasicEventLoop &loop;
-            IOTasksQueue::Handle io_handle;
+            std::optional<IOTasksQueue::Handle> io_handle;
             std::optional<Promise<void>> in_promise = std::nullopt;
             std::optional<Promise<void>> out_promise = std::nullopt;
-        };
 
-        void io_callback(IOTasksQueue::EventTypes event_types);
+            void io_callback(IOTasksQueue::EventTypes event_types);
+        };
 
         SystemFD fd;
         std::unique_ptr<State> state;
@@ -82,7 +82,6 @@ namespace AIO {
     private:
         Future<std::size_t> read_some(size_t size, char *data) const;
         Future<std::size_t> write_some(size_t size, const char *data) const;
-        BasicEventLoop &event_loop() const;
 
         std::unique_ptr<char[]> i_buf = std::make_unique<char[]>(ICAP_DEFAULT);
         std::unique_ptr<char[]> o_buf = std::make_unique<char[]>(OCAP_DEFAULT);
