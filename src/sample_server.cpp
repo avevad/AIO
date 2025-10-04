@@ -26,9 +26,9 @@ void AIO_MAIN(AIO::BasicEventLoop &loop, int argc, const char *const *argv) {
             msg_in.pop_back();
 
             std::cout << client.name() << ": " << msg_in << std::endl;
-            auto msg_out = client.name() + ": " + msg_in + END_OF_MSG;
+            auto msg_out = std::make_shared<std::string>(client.name() + ": " + msg_in + END_OF_MSG);
             for (auto &peer : clients) {
-                peer.sock.write_string(msg_out)
+                loop.execute([&, msg_out] { loop.await(peer.sock.write_string(*msg_out)); })
                     .then(loop.async([&] { loop.await(peer.sock.flush()); }))
                     .except<AIO::SystemError>(loop.async([&peer](auto &err) {
                         std::cout << "Error sending to " << peer.name() << ' ' << err.what() << std::endl;
