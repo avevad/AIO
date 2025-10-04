@@ -27,7 +27,7 @@ namespace AIO::_impl {
     }
 
     template<FutureResult Res, typename Derived>
-    void FutureBase<Res, Derived>::drop() && {
+    void FutureBase<Res, Derived>::detach() && {
         std::move(*static_cast<Derived *>(this)).consume([](MaybeResult<Res> maybe_res) {
             if (auto *error = std::get_if<std::exception_ptr>(&maybe_res)) [[unlikely]] {
                 try {

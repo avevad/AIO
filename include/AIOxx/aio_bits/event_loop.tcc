@@ -7,7 +7,7 @@
 namespace AIO {
 
     template<typename Functor, typename... Args>
-    Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::async_execute(Functor &&fun, Args &&...args) {
+    Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::execute(Functor &&fun, Args &&...args) {
         using Res = std::invoke_result_t<Functor, Args...>;
 
         Future<Res> future;
@@ -15,7 +15,7 @@ namespace AIO {
         AIO::bind(future, promise);
 
         auto job = [fun = std::forward<Functor>(fun),
-                    args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
+                    args = std::tuple<Args...>(std::forward<Args>(args)...),
                     promise = std::move(promise)] mutable {
             try {
                 if constexpr (!std::is_void_v<Res>) {
@@ -40,7 +40,7 @@ namespace AIO {
     auto BasicEventLoop::async(Functor &&fun) {
         return [this, fun = std::forward<Functor>(fun)]<typename... Args>(Args &&...args) /* [[nodiscard]] */ {
             // TODO: use true-nodiscard functor (object of a class) ------------------------------^
-            return this->async_execute(fun, std::forward<Args>(args)...);
+            return this->execute(fun, std::forward<Args>(args)...);
         };
     }
 
@@ -103,7 +103,7 @@ namespace AIO {
         auto loop_execute = loop.async([&loop, &main_function] { main_function(loop); });
         auto loop_stop = loop.async([&loop] { loop.stop(); });
 
-        loop_execute().then(loop_stop).drop();
+        loop_execute().then(loop_stop).detach();
         loop.run();
     }
 

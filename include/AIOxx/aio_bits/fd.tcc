@@ -11,7 +11,7 @@ namespace AIO {
 
     template<std::derived_from<StreamFD> BaseFD>
     Future<std::size_t> BufferedStreamFD<BaseFD>::read(size_t size, char *data) const {
-        return BaseFD::get_event_loop().async_execute([this, size, data] mutable -> size_t {
+        return BaseFD::get_event_loop().execute([this, size, data] mutable -> size_t {
             while (i_sz < size) {
                 size_t read_limit = i_beg + i_sz < i_cap ? i_cap - (i_beg + i_sz) : i_cap - i_sz;
                 size_t read_pos = i_beg + i_sz < i_cap ? i_beg + i_sz : i_beg + i_sz - i_cap;
@@ -71,7 +71,7 @@ namespace AIO {
 
     template<std::derived_from<StreamFD> BaseFD>
     Future<std::string> BufferedStreamFD<BaseFD>::read_until(char delim, size_t limit) {
-        return BaseFD::get_event_loop().async_execute([this, delim, limit] () -> std::string {
+        return BaseFD::get_event_loop().execute([this, delim, limit] () -> std::string {
             std::string result;
             while (true) {
                 if (result.size() >= limit) {
@@ -92,7 +92,7 @@ namespace AIO {
 
     template<std::derived_from<StreamFD> BaseFD>
     Future<std::size_t> BufferedStreamFD<BaseFD>::write(size_t size, const char *data) const {
-        return BaseFD::get_event_loop().async_execute([this, size, data] -> size_t {
+        return BaseFD::get_event_loop().execute([this, size, data] -> size_t {
             if (o_sz + size <= o_cap) {
                 std::copy_n(data, size, o_buf.get() + o_sz);
                 o_sz += size;
@@ -123,7 +123,7 @@ namespace AIO {
 
     template<std::derived_from<StreamFD> BaseFD>
     Future<bool> BufferedStreamFD<BaseFD>::flush() const {
-        return BaseFD::get_event_loop().async_execute([this] -> bool {
+        return BaseFD::get_event_loop().execute([this] -> bool {
             size_t write_total = 0;
             while (write_total != o_sz) {
                 size_t write_size = BaseFD::get_event_loop().await(BaseFD::write(o_sz - write_total, o_buf.get() + write_total));

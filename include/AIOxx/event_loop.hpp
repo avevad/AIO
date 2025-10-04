@@ -26,7 +26,7 @@ namespace AIO {
         BasicEventLoop &operator=(BasicEventLoop &&other) = delete;
 
         template<typename Functor, typename... Args>
-        Future<std::invoke_result_t<Functor, Args...>> async_execute(Functor &&fun, Args &&...args);
+        Future<std::invoke_result_t<Functor, Args...>> execute(Functor &&fun, Args &&...args);
 
         template<typename Rep, typename Period>
         Future<void> timeout(const std::chrono::duration<Rep, Period> &duration);

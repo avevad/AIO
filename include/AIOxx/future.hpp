@@ -49,7 +49,7 @@ namespace AIO {
             FutureBase(FutureBase &&other) noexcept;
             FutureBase &operator=(FutureBase &&other) noexcept;
 
-            void drop() &&;
+            void detach() &&;
 
             template<typename Error, typename ErrorHandler>
             Future<Res> except(ErrorHandler &&handler);
