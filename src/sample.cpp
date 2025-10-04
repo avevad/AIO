@@ -139,7 +139,7 @@ void sample_event_loop() {
             .then(print_hello)
             .then(small_delay)
             .then(print_hello)
-            .drop();
+            .detach();
 
         std::cout << "Starting calculation..." << std::endl;
         auto future = calculate().then(multiply_by_2);
@@ -174,7 +174,7 @@ void sample_event_loop() {
             .then(print_hello)
             .then(small_delay)
             .then(print_hello)
-            .drop();
+            .detach();
 
         try {
             loop.await(
