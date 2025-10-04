@@ -107,8 +107,8 @@ namespace AIO {
     }
 
     inline BasicEventLoop::BasicEventLoop()
-        : std_in(StreamFD::steal_system(this, 0)), std_out(StreamFD::steal_system(this, 1)),
-          std_err(StreamFD::steal_system(this, 2)) {
+        : std_in(StreamFD::steal_system(*this, 0)), std_out(StreamFD::steal_system(*this, 1)),
+          std_err(StreamFD::steal_system(*this, 2)) {
     }
 
     inline void BasicEventLoop::yield() {

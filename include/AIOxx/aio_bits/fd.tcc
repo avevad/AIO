@@ -92,18 +92,18 @@ namespace AIO {
 
     template<std::derived_from<StreamFD> BaseFD>
     Future<std::size_t> BufferedStreamFD<BaseFD>::write(size_t size, const char *data) const {
-        return BaseFD::loop->async_execute([this, size, data] -> size_t {
+        return BaseFD::loop.async_execute([this, size, data] -> size_t {
             if (o_sz + size <= o_cap) {
                 std::copy_n(data, size, o_buf.get() + o_sz);
                 o_sz += size;
                 return size;
             }
-            if (!BaseFD::loop->await(flush())) {
+            if (!BaseFD::loop.await(flush())) {
                 return 0;
             }
             size_t write_total = 0;
             while (write_total != size) {
-                size_t write_size = BaseFD::loop->await(BaseFD::write(size - write_total, data + write_total));
+                size_t write_size = BaseFD::loop.await(BaseFD::write(size - write_total, data + write_total));
                 if (write_size == 0) {
                     break;
                 }
@@ -123,10 +123,10 @@ namespace AIO {
 
     template<std::derived_from<StreamFD> BaseFD>
     Future<bool> BufferedStreamFD<BaseFD>::flush() const {
-        return BaseFD::loop->async_execute([this] -> bool {
+        return BaseFD::loop.async_execute([this] -> bool {
             size_t write_total = 0;
             while (write_total != o_sz) {
-                size_t write_size = BaseFD::loop->await(BaseFD::write(o_sz - write_total, o_buf.get() + write_total));
+                size_t write_size = BaseFD::loop.await(BaseFD::write(o_sz - write_total, o_buf.get() + write_total));
                 if (write_size == 0) {
                     return false;
                 }
@@ -147,7 +147,7 @@ namespace AIO {
     }
 
     template<std::derived_from<StreamFD> BaseFD>
-    BasicEventLoop *BufferedStreamFD<BaseFD>::event_loop() const {
+    BasicEventLoop &BufferedStreamFD<BaseFD>::event_loop() const {
         return BaseFD::loop;
     }
 

@@ -61,12 +61,12 @@ namespace AIO {
         return fd;
     }
 
-    StreamServerFD::StreamServerFD(BasicEventLoop *loop, const std::string &host, const std::string &service)
+    StreamServerFD::StreamServerFD(BasicEventLoop &loop, const std::string &host, const std::string &service)
     : FD(loop, make_server_socket(host, service)) {
     }
 
     Future<StreamSocketFD> StreamServerFD::accept() {
-        return loop->event({.sys_fd = sys_fd(), .types = IOEvent::IN}).map([this](auto) -> StreamSocketFD {
+        return loop.event({.sys_fd = sys_fd(), .types = IOEvent::IN}).map([this](auto) -> StreamSocketFD {
             sockaddr addr{};
             socklen_t len{};
             int fd = ::accept(sys_fd(), &addr, &len);
@@ -77,7 +77,7 @@ namespace AIO {
         });
     }
 
-    StreamFD StreamFD::open(BasicEventLoop *loop, const std::filesystem::path &path, std::ios_base::openmode mode) {
+    StreamFD StreamFD::open(BasicEventLoop &loop, const std::filesystem::path &path, std::ios_base::openmode mode) {
         int flags = 0;
         if (mode & std::ios::in) {
             flags = O_RDONLY;
@@ -92,7 +92,7 @@ namespace AIO {
         return {loop, sys_fd};
     }
 
-    StreamFD StreamFD::steal_system(BasicEventLoop *loop, FD::sys_t sys_fd) {
+    StreamFD StreamFD::steal_system(BasicEventLoop &loop, FD::sys_t sys_fd) {
         return {loop, sys_fd};
     }
 
@@ -100,7 +100,7 @@ namespace AIO {
     }
 
     Future<std::size_t> StreamFD::read(size_t size, char *data) const {
-        return loop->event({.sys_fd = fd, .types = IOEvent::IN})
+        return loop.event({.sys_fd = fd, .types = IOEvent::IN})
             .map([fd = fd, data, size](auto) -> size_t {
                 auto read_size = ::read(fd, data, size);
                 if (read_size < 0) {
@@ -111,7 +111,7 @@ namespace AIO {
     }
 
     Future<std::size_t> StreamFD::write(size_t size, const char *data) const {
-        return loop->event({.sys_fd = fd, .types = IOEvent::OUT})
+        return loop.event({.sys_fd = fd, .types = IOEvent::OUT})
             .map([fd = fd, data, size](auto) -> size_t {
                 auto write_size = ::write(fd, data, size);
                 if (write_size < 0) {
@@ -121,11 +121,11 @@ namespace AIO {
             });
     }
 
-    StreamFD::StreamFD(BasicEventLoop *loop, sys_t sys_fd) : FD(loop, sys_fd) {
+    StreamFD::StreamFD(BasicEventLoop &loop, sys_t sys_fd) : FD(loop, sys_fd) {
     }
 
     Future<StreamSocketFD>
-    StreamSocketFD::connect(BasicEventLoop *loop, const std::string &host, const std::string &service) {
+    StreamSocketFD::connect(BasicEventLoop &loop, const std::string &host, const std::string &service) {
         addrinfo *addr_info = parse_host_service_pair(host, service, false);
 
         int fd = socket(addr_info->ai_family, addr_info->ai_socktype | SOCK_NONBLOCK, addr_info->ai_protocol);
@@ -142,7 +142,7 @@ namespace AIO {
 
         freeaddrinfo(addr_info);
 
-        return loop->event({.sys_fd = fd, .types = IOEvent::OUT}).map([loop, fd] (auto) -> StreamSocketFD {
+        return loop.event({.sys_fd = fd, .types = IOEvent::OUT}).map([&loop, fd] (auto) -> StreamSocketFD {
             int err = 0;
             socklen_t err_len = sizeof err;
             if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
@@ -181,7 +181,7 @@ namespace AIO {
         }
     }
 
-    StreamSocketFD::StreamSocketFD(BasicEventLoop *loop, sys_t sys_fd) : StreamFD(loop, sys_fd) {
+    StreamSocketFD::StreamSocketFD(BasicEventLoop &loop, sys_t sys_fd) : StreamFD(loop, sys_fd) {
     }
 
     StreamServerFD::StreamServerFD(StreamServerFD &&other) noexcept : FD(std::move(other)) {

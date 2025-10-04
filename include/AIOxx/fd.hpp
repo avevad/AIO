@@ -29,16 +29,16 @@ namespace AIO {
         ~FD();
 
     protected:
-        FD(BasicEventLoop *loop, sys_t sys_fd);
+        FD(BasicEventLoop &loop, sys_t sys_fd);
 
         sys_t fd;
-        BasicEventLoop *loop;
+        BasicEventLoop &loop;
     };
 
     class StreamFD : public FD {
     public:
-        static StreamFD open(BasicEventLoop *loop, const std::filesystem::path &path, std::ios_base::openmode mode);
-        static StreamFD steal_system(BasicEventLoop *loop, FD::sys_t sys_fd);
+        static StreamFD open(BasicEventLoop &loop, const std::filesystem::path &path, std::ios_base::openmode mode);
+        static StreamFD steal_system(BasicEventLoop &loop, FD::sys_t sys_fd);
 
         StreamFD(StreamFD &&other) noexcept;
         using FD::operator=;
@@ -47,7 +47,7 @@ namespace AIO {
         Future<std::size_t> write(size_t size, const char *data) const;
 
     protected:
-        StreamFD(BasicEventLoop *loop, sys_t sys_fd);
+        StreamFD(BasicEventLoop &loop, sys_t sys_fd);
     };
 
     template<std::derived_from<StreamFD> BaseFD>
@@ -69,7 +69,7 @@ namespace AIO {
     private:
         Future<std::size_t> read_some(size_t size, char *data) const;
         Future<std::size_t> write_some(size_t size, const char *data) const;
-        BasicEventLoop *event_loop() const;
+        BasicEventLoop &event_loop() const;
 
         std::unique_ptr<char[]> i_buf = std::make_unique<char[]>(ICAP_DEFAULT);
         std::unique_ptr<char[]> o_buf = std::make_unique<char[]>(OCAP_DEFAULT);

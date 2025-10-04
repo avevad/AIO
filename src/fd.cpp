@@ -22,20 +22,20 @@ namespace AIO {
 
     FD::FD(FD &&other) noexcept : fd(other.fd), loop(other.loop) {
         other.fd = -1;
-        other.loop = nullptr;
     }
 
     FD &FD::operator=(FD &&other) noexcept {
+        if (&other.loop != &loop) {
+            assertion_failed("assignment of FDs between different event loops");
+        }
         fd = other.fd;
-        loop = other.loop;
 
         other.fd = -1;
-        other.loop = nullptr;
 
         return *this;
     }
 
-    FD::FD(BasicEventLoop *loop, sys_t sys_fd) : fd(sys_fd), loop(loop) {
+    FD::FD(BasicEventLoop &loop, sys_t sys_fd) : fd(sys_fd), loop(loop) {
     }
 
 } // namespace AIO
