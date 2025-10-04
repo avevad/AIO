@@ -15,7 +15,7 @@ namespace AIO {
 
     class FD {
     public:
-        using sys_t = IOEvent::sys_fd_t;
+        enum Direction { IN, OUT };
 
         FD(const FD &) = delete;
         FD &operator=(const FD &) = delete;
@@ -23,22 +23,35 @@ namespace AIO {
         FD(FD &&other) noexcept;
         FD &operator=(FD &&other) noexcept;
 
-        [[nodiscard]] sys_t sys_fd() const;
-        sys_t release_to_system() &&;
+        [[nodiscard]] Future<void> event(Direction direction) const;
 
+        [[nodiscard]] SystemFD release_to_system() &&;
         ~FD();
 
     protected:
-        FD(BasicEventLoop *loop, sys_t sys_fd);
+        [[nodiscard]] SystemFD get_sys_fd() const;
+        [[nodiscard]] BasicEventLoop &get_event_loop() const;
 
-        sys_t fd;
-        BasicEventLoop *loop;
+        FD(BasicEventLoop &loop, SystemFD sys_fd);
+
+    private:
+        struct State {
+            BasicEventLoop &loop;
+            std::optional<IOTasksQueue::Handle> io_handle;
+            std::optional<Promise<void>> in_promise = std::nullopt;
+            std::optional<Promise<void>> out_promise = std::nullopt;
+
+            void io_callback(IOTasksQueue::EventTypes event_types);
+        };
+
+        SystemFD fd;
+        std::unique_ptr<State> state;
     };
 
     class StreamFD : public FD {
     public:
-        static StreamFD open(BasicEventLoop *loop, const std::filesystem::path &path, std::ios_base::openmode mode);
-        static StreamFD steal_system(BasicEventLoop *loop, FD::sys_t sys_fd);
+        static StreamFD open(BasicEventLoop &loop, const std::filesystem::path &path, std::ios_base::openmode mode);
+        static StreamFD steal_from_system(BasicEventLoop &loop, SystemFD sys_fd);
 
         StreamFD(StreamFD &&other) noexcept;
         using FD::operator=;
@@ -47,37 +60,10 @@ namespace AIO {
         Future<std::size_t> write(size_t size, const char *data) const;
 
     protected:
-        StreamFD(BasicEventLoop *loop, sys_t sys_fd);
+        StreamFD(BasicEventLoop &loop, SystemFD sys_fd);
     };
 
-    class StreamSocketFD : public StreamFD {
-    public:
-        static Future<StreamSocketFD> connect(BasicEventLoop *loop, const std::string &host, const std::string &service);
-
-        StreamSocketFD(StreamSocketFD &&other) noexcept;
-        using StreamFD::operator=;
-
-        void shutdown(bool read = true, bool write = true) const;
-
-        ~StreamSocketFD();
-
-    private:
-        StreamSocketFD(BasicEventLoop *loop, sys_t sys_fd);
-
-        friend class StreamServerFD;
-    };
-
-    class StreamServerFD : public FD {
-    public:
-        StreamServerFD(StreamServerFD &&other) noexcept;
-        using FD::operator=;
-
-        StreamServerFD(BasicEventLoop *loop, const std::string &host, const std::string &service);
-
-        Future<StreamSocketFD> accept();
-    };
-
-    template<std::derived_from<StreamSocketFD> BaseFD>
+    template<std::derived_from<StreamFD> BaseFD>
     class BufferedStreamFD : public BaseFD {
     public:
         constexpr static size_t ICAP_DEFAULT = 1024, OCAP_DEFAULT = 1024;
@@ -96,7 +82,6 @@ namespace AIO {
     private:
         Future<std::size_t> read_some(size_t size, char *data) const;
         Future<std::size_t> write_some(size_t size, const char *data) const;
-        BasicEventLoop *event_loop() const;
 
         std::unique_ptr<char[]> i_buf = std::make_unique<char[]>(ICAP_DEFAULT);
         std::unique_ptr<char[]> o_buf = std::make_unique<char[]>(OCAP_DEFAULT);

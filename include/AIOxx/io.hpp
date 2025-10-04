@@ -2,35 +2,48 @@
 
 #include <chrono>
 #include <functional>
+#include <list>
 
 namespace AIO {
+    using SystemFD = int;
 
-    struct IOEvent {
-        using sys_fd_t = int;
+    class IOTasksQueue {
+    public:
+        enum EventType : uint8_t { IN = 1, OUT = 2, ERR = 4, HUP = 8 };
+        using EventTypes = uint8_t;
+        using Task = std::move_only_function<void()>;
+        using TaskCallback = std::move_only_function<void(EventTypes)>;
+        class Handle {
+        public:
+            Handle(Handle &&other) noexcept;
 
-        enum Type : uint8_t {
-            IN = 1, OUT = 2, ERR = 4, HUP = 8
+            void update(EventTypes event_types);
+
+            ~Handle();
+        private:
+            friend IOTasksQueue;
+
+            Handle(SystemFD fd, IOTasksQueue &queue, TaskCallback callback);
+
+            SystemFD fd;
+            IOTasksQueue &queue;
+            std::unique_ptr<TaskCallback> callback;
         };
 
-        using Types = uint8_t;
-        using Callback = std::move_only_function<void(Types)>;
+        IOTasksQueue();
 
-        sys_fd_t sys_fd;
-        Types types;
-    };
+        Handle push(SystemFD fd, TaskCallback callback);
+        void update(Handle &handle, EventTypes event_types);
+        void erase(Handle &&handle);
+        std::optional<Task> poll(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline);
 
-    class IOQueue {
-    public:
-        IOQueue();
+        [[nodiscard]] bool is_empty() const;
 
-        void register_event(IOEvent event, IOEvent::Callback *callback, bool oneshot);
-        void deregister_event(IOEvent::sys_fd_t fd);
-        void poll_event(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline);
-
-        ~IOQueue();
+        ~IOTasksQueue();
 
     private:
-        int epfd;
+        int ep_fd;
+        size_t size = 0;
     };
 
 } // namespace AIO

@@ -28,28 +28,24 @@ namespace AIO {
         template<typename Functor, typename... Args>
         Future<std::invoke_result_t<Functor, Args...>> async_execute(Functor &&fun, Args &&...args);
 
+        template<typename Rep, typename Period>
+        Future<void> timeout(const std::chrono::duration<Rep, Period> &duration);
+
+        Future<void> deadline(const std::chrono::time_point<std::chrono::steady_clock> &time);
+
         template<typename Functor>
         auto async(Functor &&fun);
 
         template<typename Res>
         Res await(Future<Res> future);
 
-        void yield();
-
-        [[noreturn]] void stop();
-
-        template<typename Rep, typename Period>
-        Future<void> timeout(const std::chrono::duration<Rep, Period> &duration);
-
-        Future<void> deadline(const std::chrono::time_point<std::chrono::steady_clock> &time);
-
-        Future<IOEvent::Types> event(IOEvent event);
+        IOTasksQueue::Handle register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback);
 
         void run();
+        void yield();
+        [[noreturn]] void stop();
 
         ~BasicEventLoop();
-
-        const StreamFD std_in, std_out, std_err;
 
     private:
         struct CoroutineHolder : std::enable_shared_from_this<CoroutineHolder> {
@@ -68,12 +64,6 @@ namespace AIO {
             bool operator<(const TimedTask &task1) const;
         };
 
-        struct IOTask {
-            std::list<IOTask>::iterator iter;
-            IOEvent event;
-            IOEvent::Callback callback;
-        };
-
         template<FutureResult Res>
         friend class Future;
 
@@ -81,12 +71,14 @@ namespace AIO {
 
         std::queue<Task> pending_tasks = {};
         std::multiset<TimedTask> pending_timed_tasks = {};
-        std::list<IOTask> pending_io_tasks = {};
+        IOTasksQueue pending_io_tasks = {};
 
         std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
-        IOQueue io_queue;
 
         bool stopped = false;
+
+    public:
+        const StreamFD std_in, std_out, std_err;
     };
 
     void run(const std::function<void(BasicEventLoop &)> &main_function);
