@@ -132,6 +132,7 @@ namespace AIO {
                 }
                 write_total += write_size;
             }
+            o_sz = 0;
             return true;
         });
     }
