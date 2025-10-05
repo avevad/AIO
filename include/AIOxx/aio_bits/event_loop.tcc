@@ -138,6 +138,15 @@ namespace AIO {
         return future;
     }
 
+    inline Future<void> BasicEventLoop::forever() {
+        return execute([this] {
+            Future<void> future;
+            Promise<void> promise;
+            bind(future, promise);
+            await(std::move(future));
+        });
+    }
+
     inline IOTasksQueue::Handle BasicEventLoop::register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback) {
         return pending_io_tasks.push(fd, std::move(callback));
     }

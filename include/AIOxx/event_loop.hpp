@@ -33,6 +33,8 @@ namespace AIO {
 
         Future<void> deadline(const std::chrono::time_point<std::chrono::steady_clock> &time);
 
+        Future<void> forever();
+
         template<typename Functor>
         auto async(Functor &&fun);
 
