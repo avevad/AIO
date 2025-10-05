@@ -1,9 +1,9 @@
 #pragma once
 
 #include "coroutine.hpp"
+#include "fd.hpp"
 #include "future.hpp"
 #include "io.hpp"
-#include "fd.hpp"
 #include "util.hpp"
 
 #include <chrono>
@@ -47,6 +47,10 @@ namespace AIO {
         void yield();
         [[noreturn]] void stop();
 
+        const StreamFD &get_stdin();
+        const StreamFD &get_stdout();
+        const StreamFD &get_stderr();
+
         ~BasicEventLoop();
 
     private:
@@ -75,12 +79,10 @@ namespace AIO {
         std::multiset<TimedTask> pending_timed_tasks = {};
         IOTasksQueue pending_io_tasks = {};
 
+        bool stopped = false;
         std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
 
-        bool stopped = false;
-
-    public:
-        const StreamFD std_in, std_out, std_err;
+        std::optional<StreamFD> std_in = std::nullopt, std_out = std::nullopt, std_err = std::nullopt;
     };
 
     void run(const std::function<void(BasicEventLoop &)> &main_function);

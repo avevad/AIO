@@ -107,9 +107,7 @@ namespace AIO {
         loop.run();
     }
 
-    inline BasicEventLoop::BasicEventLoop()
-        : std_in(StreamFD::steal_from_system(*this, 0)), std_out(StreamFD::steal_from_system(*this, 1)),
-          std_err(StreamFD::steal_from_system(*this, 2)) {
+    inline BasicEventLoop::BasicEventLoop() {
     }
 
     inline void BasicEventLoop::yield() {
@@ -125,6 +123,27 @@ namespace AIO {
         stopped = true;
         yield();
         assertion_failed("event loop stop trap");
+    }
+
+    inline const StreamFD &BasicEventLoop::get_stdin() {
+        if (!std_in.has_value()) {
+            std_in.emplace(StreamFD::steal_from_system(*this, 0));
+        }
+        return std_in.value();
+    }
+
+    inline const StreamFD &BasicEventLoop::get_stdout() {
+        if (!std_out.has_value()) {
+            std_out.emplace(StreamFD::steal_from_system(*this, 1));
+        }
+        return std_out.value();
+    }
+
+    inline const StreamFD &BasicEventLoop::get_stderr() {
+        if (!std_err.has_value()) {
+            std_err.emplace(StreamFD::steal_from_system(*this, 2));
+        }
+        return std_err.value();
     }
 
     inline Future<void> BasicEventLoop::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
@@ -202,9 +221,11 @@ namespace AIO {
     }
 
     inline BasicEventLoop::~BasicEventLoop() {
-        (void) std::move(const_cast<StreamFD &>(std_in)).release_to_system();
-        (void) std::move(const_cast<StreamFD &>(std_out)).release_to_system();
-        (void) std::move(const_cast<StreamFD &>(std_err)).release_to_system();
+        for (auto *maybe_stream : {&std_in, &std_out, &std_err}) {
+            if (maybe_stream->has_value()) {
+                (void) std::move(maybe_stream->value()).release_to_system();
+            }
+        }
     }
 
 } // namespace AIO
