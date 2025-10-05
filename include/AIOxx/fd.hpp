@@ -25,12 +25,13 @@ namespace AIO {
 
         [[nodiscard]] Future<void> event(Direction direction) const;
 
+        [[nodiscard]] BasicEventLoop &get_event_loop() const;
+
         [[nodiscard]] SystemFD release_to_system() &&;
         ~FD();
 
     protected:
         [[nodiscard]] SystemFD get_sys_fd() const;
-        [[nodiscard]] BasicEventLoop &get_event_loop() const;
 
         FD(BasicEventLoop &loop, SystemFD sys_fd);
 
