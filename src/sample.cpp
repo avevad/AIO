@@ -154,7 +154,7 @@ void sample_event_loop() {
         // Don't do actual reading - just wait for *some* data -- if STDIN is a terminal,
         // then a whole line would be ready for consequent std::istream read
         if (loop.await(
-            loop.std_in.read(0, nullptr) |
+            loop.get_stdin().read(0, nullptr) |
             loop.timeout(5s)
         )) {
             std::cout << "Got it!" << std::endl;
