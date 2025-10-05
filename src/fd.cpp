@@ -65,7 +65,7 @@ namespace AIO {
             std::move(in_promise.value()).fulfill();
             in_promise.reset();
         }
-        if (event_types & IOTasksQueue::OUT && in_promise.has_value()) {
+        if (event_types & IOTasksQueue::OUT && out_promise.has_value()) {
             std::move(out_promise.value()).fulfill();
             out_promise.reset();
         }
