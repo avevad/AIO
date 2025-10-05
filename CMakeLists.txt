@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.5)
 project(AIOxx LANGUAGES CXX ASM)
 
+cmake_policy(SET CMP0077 NEW)
+
 option(AIOXX_BUILD_TESTS            "Build AIO++ unittests" ON)
 option(AIOXX_RUNTIME_WARNINGS       "Enable AIO++ runtime warnings in stderr" ON)
 option(AIOXX_INSTALL                "Enable AIO++ installation" ON)
