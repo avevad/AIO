@@ -35,4 +35,4 @@ jobs:
 
     - name: Run sample
       working-directory: ${{github.workspace}}/build
-      run: AIO_NO_RUNTIME_WARNINGS=1 ./sample
+      run: echo avevad | AIO_NO_RUNTIME_WARNINGS=1 ./sample
