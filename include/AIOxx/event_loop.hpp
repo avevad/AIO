@@ -15,77 +15,77 @@
 
 namespace AIO {
 
-    class BasicEventLoop {
-    public:
-        BasicEventLoop();
+class BasicEventLoop {
+public:
+  BasicEventLoop();
 
-        BasicEventLoop(const BasicEventLoop &) = delete;
-        BasicEventLoop(BasicEventLoop &&other) = delete;
+  BasicEventLoop(const BasicEventLoop &) = delete;
+  BasicEventLoop(BasicEventLoop &&other) = delete;
 
-        BasicEventLoop &operator=(const BasicEventLoop &) = delete;
-        BasicEventLoop &operator=(BasicEventLoop &&other) = delete;
+  BasicEventLoop &operator=(const BasicEventLoop &) = delete;
+  BasicEventLoop &operator=(BasicEventLoop &&other) = delete;
 
-        template<typename Functor, typename... Args>
-        Future<std::invoke_result_t<Functor, Args...>> execute(Functor &&fun, Args &&...args);
+  template<typename Functor, typename... Args>
+  Future<std::invoke_result_t<Functor, Args...>> execute(Functor &&fun, Args &&...args);
 
-        template<typename Rep, typename Period>
-        Future<void> timeout(const std::chrono::duration<Rep, Period> &duration);
+  template<typename Rep, typename Period>
+  Future<void> timeout(const std::chrono::duration<Rep, Period> &duration);
 
-        Future<void> deadline(const std::chrono::time_point<std::chrono::steady_clock> &time);
+  Future<void> deadline(const std::chrono::time_point<std::chrono::steady_clock> &time);
 
-        Future<void> forever();
+  Future<void> forever();
 
-        template<typename Functor>
-        auto async(Functor &&fun);
+  template<typename Functor>
+  auto async(Functor &&fun);
 
-        template<typename Res>
-        Res await(Future<Res> future);
+  template<typename Res>
+  Res await(Future<Res> future);
 
-        IOTasksQueue::Handle register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback);
+  IOTasksQueue::Handle register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback);
 
-        void run();
-        void yield();
-        [[noreturn]] void stop();
+  void run();
+  void yield();
+  [[noreturn]] void stop();
 
-        const StreamFD &get_stdin();
-        const StreamFD &get_stdout();
-        const StreamFD &get_stderr();
+  const StreamFD &get_stdin();
+  const StreamFD &get_stdout();
+  const StreamFD &get_stderr();
 
-        ~BasicEventLoop();
+  ~BasicEventLoop();
 
-    private:
-        struct CoroutineHolder : std::enable_shared_from_this<CoroutineHolder> {
-            template<typename Functor>
-            explicit CoroutineHolder(Functor fun);
+private:
+  struct CoroutineHolder : std::enable_shared_from_this<CoroutineHolder> {
+    template<typename Functor>
+    explicit CoroutineHolder(Functor fun);
 
-            Coroutine<void()> wrapped;
-        };
+    Coroutine<void()> wrapped;
+  };
 
-        using Task = std::move_only_function<void()>;
+  using Task = std::move_only_function<void()>;
 
-        struct TimedTask {
-            std::chrono::time_point<std::chrono::steady_clock> when;
-            Task what;
+  struct TimedTask {
+    std::chrono::time_point<std::chrono::steady_clock> when;
+    Task what;
 
-            bool operator<(const TimedTask &task1) const;
-        };
+    bool operator<(const TimedTask &task1) const;
+  };
 
-        template<FutureResult Res>
-        friend class Future;
+  template<FutureResult Res>
+  friend class Future;
 
-        void do_coroutine_step(std::shared_ptr<CoroutineHolder> coro);
+  void do_coroutine_step(std::shared_ptr<CoroutineHolder> coro);
 
-        std::queue<Task> pending_tasks = {};
-        std::multiset<TimedTask> pending_timed_tasks = {};
-        IOTasksQueue pending_io_tasks = {};
+  std::queue<Task> pending_tasks = {};
+  std::multiset<TimedTask> pending_timed_tasks = {};
+  IOTasksQueue pending_io_tasks = {};
 
-        bool stopped = false;
-        std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
+  bool stopped = false;
+  std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
 
-        std::optional<StreamFD> std_in = std::nullopt, std_out = std::nullopt, std_err = std::nullopt;
-    };
+  std::optional<StreamFD> std_in = std::nullopt, std_out = std::nullopt, std_err = std::nullopt;
+};
 
-    void run(const std::function<void(BasicEventLoop &)> &main_function);
+void run(const std::function<void(BasicEventLoop &)> &main_function);
 
 } // namespace AIO
 
