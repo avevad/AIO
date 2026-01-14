@@ -50,7 +50,8 @@ Future<void> FD::event(Direction direction) const {
   bind(future, promise);
   promise_slot = std::move(promise);
   state->io_handle.value().update(
-    (state->in_promise.has_value() ? IOTasksQueue::IN : 0) | (state->out_promise.has_value() ? IOTasksQueue::OUT : 0));
+    (state->in_promise.has_value() ? IOTasksQueue::IN : 0) | (state->out_promise.has_value() ? IOTasksQueue::OUT : 0)
+  );
   return future;
 }
 
@@ -69,7 +70,8 @@ void FD::State::io_callback(IOTasksQueue::EventTypes event_types) {
     out_promise.reset();
   }
   io_handle.value().update(
-    (in_promise.has_value() ? IOTasksQueue::IN : 0) | (out_promise.has_value() ? IOTasksQueue::OUT : 0));
+    (in_promise.has_value() ? IOTasksQueue::IN : 0) | (out_promise.has_value() ? IOTasksQueue::OUT : 0)
+  );
 }
 
 StreamFD StreamFD::open(BasicEventLoop &loop, const std::filesystem::path &path, std::ios_base::openmode mode) {

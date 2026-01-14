@@ -112,6 +112,7 @@ Future<std::size_t> BufferedStreamFD<BaseFD>::write(size_t size, const char *dat
     return write_total;
   });
 }
+
 template<std::derived_from<StreamFD> BaseFD>
 Future<void> BufferedStreamFD<BaseFD>::write_string(std::string_view str) const {
   return write(str.size(), str.data()).map([str](size_t written) {

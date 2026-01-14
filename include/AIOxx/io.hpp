@@ -10,9 +10,11 @@ using SystemFD = int;
 class IOTasksQueue {
 public:
   enum EventType : uint8_t { IN = 1, OUT = 2, ERR = 4, HUP = 8 };
+
   using EventTypes = uint8_t;
   using Task = std::move_only_function<void()>;
   using TaskCallback = std::move_only_function<void(EventTypes)>;
+
   class Handle {
   public:
     Handle(Handle &&other) noexcept;

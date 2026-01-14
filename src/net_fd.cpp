@@ -14,7 +14,8 @@ addrinfo *parse_host_service_pair(const std::string &host, const std::string &se
     .ai_addrlen = 0,
     .ai_addr = nullptr,
     .ai_canonname = nullptr,
-    .ai_next = nullptr};
+    .ai_next = nullptr
+  };
   addrinfo *addr_info = nullptr;
   int res = getaddrinfo(host.c_str(), service.c_str(), &addr_hints, &addr_info);
   if (res != 0 || !addr_info) {
