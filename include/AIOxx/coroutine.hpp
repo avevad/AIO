@@ -4,235 +4,235 @@
 #include <memory>
 #include <type_traits>
 
-#include "coroutine.hpp"
 #include "context.hpp"
+#include "coroutine.hpp"
 #include "util.hpp"
 
 namespace AIO {
 
-    namespace _impl {
+namespace _impl {
 
-        static inline thread_local void *volatile current_coroutine = nullptr;
-        static inline constexpr std::size_t COROUTINE_STACK_SIZE = 16 * 1024; // 16 KiB
+  static inline thread_local void *volatile current_coroutine = nullptr;
+  static inline constexpr std::size_t COROUTINE_STACK_SIZE = 16 * 1024; // 16 KiB
 
-        template<typename Ret, typename Arg>
-        struct MetaActualSignature {
-            using Type = Ret(Arg);
-        };
+  template<typename Ret, typename Arg>
+  struct MetaActualSignature {
+    using Type = Ret(Arg);
+  };
 
-        template<typename Ret>
-        struct MetaActualSignature<Ret, void> {
-            using Type = Ret();
-        };
+  template<typename Ret>
+  struct MetaActualSignature<Ret, void> {
+    using Type = Ret();
+  };
 
-        template<typename Ret, typename Arg>
-        using MetaActualSignatureT = typename MetaActualSignature<Ret, Arg>::Type;
+  template<typename Ret, typename Arg>
+  using MetaActualSignatureT = typename MetaActualSignature<Ret, Arg>::Type;
 
-        template<typename Ret, typename Arg, typename Derived>
-        class CoroutineBase;
+  template<typename Ret, typename Arg, typename Derived>
+  class CoroutineBase;
 
-        class CoroutineKiller {
-        public:
-            CoroutineKiller();
-            ~CoroutineKiller() noexcept(false);
+  class CoroutineKiller {
+  public:
+    CoroutineKiller();
+    ~CoroutineKiller() noexcept(false);
 
-        private:
-            template<typename Ret, typename Arg, typename Derived>
-            friend class CoroutineBase;
+  private:
+    template<typename Ret, typename Arg, typename Derived>
+    friend class CoroutineBase;
 
-            bool caught = false;
-        };
+    bool caught = false;
+  };
 
-        template<typename Ret, typename Arg, typename Derived>
-        class CoroutineBase {
-        public:
-            template<typename Functor, typename FunctorDecay = std::decay_t<Functor>>
-                requires(!std::is_same_v<FunctorDecay, CoroutineBase<Ret, Arg, Derived>>)
-            /* implicit */ CoroutineBase(Functor &&fun); // NOLINT(*-explicit-constructor)
+  template<typename Ret, typename Arg, typename Derived>
+  class CoroutineBase {
+  public:
+    template<typename Functor, typename FunctorDecay = std::decay_t<Functor>>
+      requires(!std::is_same_v<FunctorDecay, CoroutineBase<Ret, Arg, Derived>>)
+    /* implicit */ CoroutineBase(Functor &&fun); // NOLINT(*-explicit-constructor)
 
-            CoroutineBase(const CoroutineBase &) = delete;
-            CoroutineBase(CoroutineBase &&other) = delete;
+    CoroutineBase(const CoroutineBase &) = delete;
+    CoroutineBase(CoroutineBase &&other) = delete;
 
-            CoroutineBase &operator=(const CoroutineBase &) = delete;
-            CoroutineBase &operator=(CoroutineBase &&other) = delete;
+    CoroutineBase &operator=(const CoroutineBase &) = delete;
+    CoroutineBase &operator=(CoroutineBase &&other) = delete;
 
-            template<typename... ResumeArgs>
-            Ret resume(ResumeArgs &&...arg);
+    template<typename... ResumeArgs>
+    Ret resume(ResumeArgs &&...arg);
 
-            template<typename... YieldRets>
-            Arg yield(YieldRets &&...ret);
+    template<typename... YieldRets>
+    Arg yield(YieldRets &&...ret);
 
-            [[nodiscard]] bool is_dead() const;
+    [[nodiscard]] bool is_dead() const;
 
-            void kill();
+    void kill();
 
-            ~CoroutineBase();
+    ~CoroutineBase();
 
-        private:
-            using SignatureT = MetaActualSignatureT<Ret, Arg>;
+  private:
+    using SignatureT = MetaActualSignatureT<Ret, Arg>;
 
-            [[noreturn]] static context_t &entrypoint() noexcept;
+    [[noreturn]] static context_t &entrypoint() noexcept;
 
-            void yield_error_impl();
+    void yield_error_impl();
 
-        protected:
-            enum class State : uint8_t { RUN = 0, FINISH = 1, ERROR = 2 };
+  protected:
+    enum class State : uint8_t { RUN = 0, FINISH = 1, ERROR = 2 };
 
-            void check_rethrow();
+    void check_rethrow();
 
-            void check_kill();
+    void check_kill();
 
-            std::move_only_function<SignatureT> fun;
-            std::unique_ptr<char[]> stack;
+    std::move_only_function<SignatureT> fun;
+    std::unique_ptr<char[]> stack;
 
-            context_t ctx{};
-            State state = State::RUN;
-        };
+    context_t ctx{};
+    State state = State::RUN;
+  };
 
-    } // namespace _impl
+} // namespace _impl
 
-    template<typename Signature>
-    class Coroutine;
+template<typename Signature>
+class Coroutine;
 
-    template<typename Ret, typename Arg>
-    class Coroutine<Ret(Arg)> final : public _impl::CoroutineBase<Ret, Arg, Coroutine<Ret(Arg)>> {
-        using Base = _impl::CoroutineBase<Ret, Arg, Coroutine>;
+template<typename Ret, typename Arg>
+class Coroutine<Ret(Arg)> final : public _impl::CoroutineBase<Ret, Arg, Coroutine<Ret(Arg)>> {
+  using Base = _impl::CoroutineBase<Ret, Arg, Coroutine>;
 
-    public:
-        using Base::Base;
+public:
+  using Base::Base;
 
-    private:
-        friend Base;
+private:
+  friend Base;
 
-        template<typename ResumeArg>
-        Ret resume_impl(ResumeArg &&arg);
-        template<typename YieldRet>
-        Arg yield_impl(YieldRet &&ret, bool finish);
+  template<typename ResumeArg>
+  Ret resume_impl(ResumeArg &&arg);
+  template<typename YieldRet>
+  Arg yield_impl(YieldRet &&ret, bool finish);
 
-        static void entrypoint();
+  static void entrypoint();
 
-        using RetV = std::remove_reference_t<Ret>;
-        using ArgV = std::remove_reference_t<Arg>;
+  using RetV = std::remove_reference_t<Ret>;
+  using ArgV = std::remove_reference_t<Arg>;
 
-        RetV *ret = nullptr;
-        ArgV *arg = nullptr;
-    };
+  RetV *ret = nullptr;
+  ArgV *arg = nullptr;
+};
 
-    template<typename Arg>
-    class Coroutine<void(Arg)> final : public _impl::CoroutineBase<void, Arg, Coroutine<void(Arg)>> {
-        using Base = _impl::CoroutineBase<void, Arg, Coroutine>;
+template<typename Arg>
+class Coroutine<void(Arg)> final : public _impl::CoroutineBase<void, Arg, Coroutine<void(Arg)>> {
+  using Base = _impl::CoroutineBase<void, Arg, Coroutine>;
 
-    public:
-        using Base::Base;
+public:
+  using Base::Base;
 
-    private:
-        friend Base;
+private:
+  friend Base;
 
-        template<typename ResumeArg>
-        void resume_impl(ResumeArg &&arg);
-        Arg yield_impl(bool finish);
+  template<typename ResumeArg>
+  void resume_impl(ResumeArg &&arg);
+  Arg yield_impl(bool finish);
 
-        static void entrypoint();
+  static void entrypoint();
 
-        using ArgV = std::remove_reference_t<Arg>;
+  using ArgV = std::remove_reference_t<Arg>;
 
-        ArgV *arg = nullptr;
-    };
+  ArgV *arg = nullptr;
+};
 
-    template<typename Ret>
-    class Coroutine<Ret()> final : public _impl::CoroutineBase<Ret, void, Coroutine<Ret()>> {
-        using Base = _impl::CoroutineBase<Ret, void, Coroutine>;
+template<typename Ret>
+class Coroutine<Ret()> final : public _impl::CoroutineBase<Ret, void, Coroutine<Ret()>> {
+  using Base = _impl::CoroutineBase<Ret, void, Coroutine>;
 
-    public:
-        using Base::Base;
+public:
+  using Base::Base;
 
-    private:
-        friend Base;
+private:
+  friend Base;
 
-        Ret resume_impl();
-        template<typename YieldRet>
-        void yield_impl(YieldRet &&ret, bool finish);
+  Ret resume_impl();
+  template<typename YieldRet>
+  void yield_impl(YieldRet &&ret, bool finish);
 
-        static void entrypoint();
+  static void entrypoint();
 
-        using RetV = std::remove_reference_t<Ret>;
+  using RetV = std::remove_reference_t<Ret>;
 
-        RetV *ret = nullptr;
-    };
+  RetV *ret = nullptr;
+};
 
-    template<>
-    class Coroutine<void()> final : public _impl::CoroutineBase<void, void, Coroutine<void()>> {
-        using Base = CoroutineBase;
+template<>
+class Coroutine<void()> final : public _impl::CoroutineBase<void, void, Coroutine<void()>> {
+  using Base = CoroutineBase;
 
-    public:
-        using Base::Base;
+public:
+  using Base::Base;
 
-    private:
-        friend Base;
+private:
+  friend Base;
 
-        void resume_impl();
-        void yield_impl(bool finish);
+  void resume_impl();
+  void yield_impl(bool finish);
 
-        static void entrypoint();
-    };
+  static void entrypoint();
+};
 
-    class EndGeneration final : public std::exception {
-    public:
-        EndGeneration();
+class EndGeneration final : public std::exception {
+public:
+  EndGeneration();
 
-        [[nodiscard]] const char *what() const noexcept override;
-    };
+  [[nodiscard]] const char *what() const noexcept override;
+};
 
-    struct CoroutineIteratorEnd final {};
+struct CoroutineIteratorEnd final {};
 
-    template<typename Ret>
-    class CoroutineIterator final {
-    public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = Ret;
-        using pointer = Ret *;
-        using reference = Ret &;
-        using difference_type = std::ptrdiff_t;
+template<typename Ret>
+class CoroutineIterator final {
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = Ret;
+  using pointer = Ret *;
+  using reference = Ret &;
+  using difference_type = std::ptrdiff_t;
 
-        explicit CoroutineIterator(Coroutine<Ret()> &coro);
+  explicit CoroutineIterator(Coroutine<Ret()> &coro);
 
-        // ReSharper disable once CppNonExplicitConvertingConstructor
-        /* implicit */ CoroutineIterator(CoroutineIteratorEnd); // NOLINT(*-explicit-constructor)
+  // ReSharper disable once CppNonExplicitConvertingConstructor
+  /* implicit */ CoroutineIterator(CoroutineIteratorEnd); // NOLINT(*-explicit-constructor)
 
-        CoroutineIterator(const CoroutineIterator &other);
-        CoroutineIterator &operator=(const CoroutineIterator &other);
+  CoroutineIterator(const CoroutineIterator &other);
+  CoroutineIterator &operator=(const CoroutineIterator &other);
 
-        CoroutineIterator(CoroutineIterator &&) = default;
-        CoroutineIterator &operator=(CoroutineIterator &&) = default;
+  CoroutineIterator(CoroutineIterator &&) = default;
+  CoroutineIterator &operator=(CoroutineIterator &&) = default;
 
-        Ret &operator*() const;
-        Ret *operator->() const;
+  Ret &operator*() const;
+  Ret *operator->() const;
 
-        CoroutineIterator &operator++();
+  CoroutineIterator &operator++();
 
-        bool operator==(const CoroutineIterator &other) const;
-        bool operator!=(const CoroutineIterator &other) const;
+  bool operator==(const CoroutineIterator &other) const;
+  bool operator!=(const CoroutineIterator &other) const;
 
-    private:
-        void obtain_value() const;
+private:
+  void obtain_value() const;
 
-        mutable Coroutine<Ret()> *coro = nullptr;
-        mutable std::optional<Ret> holder = std::nullopt;
-    };
+  mutable Coroutine<Ret()> *coro = nullptr;
+  mutable std::optional<Ret> holder = std::nullopt;
+};
 
-    template<typename Ret>
-    class CoroutineGenerator {
-    public:
-        // ReSharper disable once CppNonExplicitConvertingConstructor
-        CoroutineGenerator(Coroutine<Ret()> &coro); // NOLINT(*-explicit-constructor)
-        CoroutineGenerator();
+template<typename Ret>
+class CoroutineGenerator {
+public:
+  // ReSharper disable once CppNonExplicitConvertingConstructor
+  CoroutineGenerator(Coroutine<Ret()> &coro); // NOLINT(*-explicit-constructor)
+  CoroutineGenerator();
 
-        CoroutineIterator<Ret> begin() const;
-        CoroutineIterator<Ret> end() const;
+  CoroutineIterator<Ret> begin() const;
+  CoroutineIterator<Ret> end() const;
 
-    private:
-        Coroutine<Ret()> *coro = nullptr;
-    };
+private:
+  Coroutine<Ret()> *coro = nullptr;
+};
 
 } // namespace AIO
 
