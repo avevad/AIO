@@ -44,6 +44,7 @@ namespace _sysv_amd64 {
     R64 r14;
     R64 r15;
   };
+
   static_assert(sizeof(aio_context_t) == 64);
 
   extern "C" void aio_context_switch(aio_context_t *ctx);

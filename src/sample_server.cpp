@@ -30,8 +30,9 @@ void AIO_MAIN(AIO::BasicEventLoop &loop, int argc, const char *const *argv) {
       for (auto &peer : clients) {
         loop.execute([&, msg_out] { loop.await(peer.sock.write_string(*msg_out)); })
           .then(loop.async([&] { loop.await(peer.sock.flush()); }))
-          .except<AIO::SystemError>(loop.async(
-            [&peer](auto &err) { std::cout << "Error sending to " << peer.name() << ' ' << err.what() << std::endl; }))
+          .except<AIO::SystemError>(loop.async([&peer](auto &err) {
+            std::cout << "Error sending to " << peer.name() << ' ' << err.what() << std::endl;
+          }))
           .detach();
       }
     }

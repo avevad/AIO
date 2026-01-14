@@ -71,13 +71,14 @@ Res BasicEventLoop::await(Future<Res> future) {
 
   return result.value().move_out();
 }
+
 template<typename Rep, typename Period>
 Future<void> BasicEventLoop::timeout(const std::chrono::duration<Rep, Period> &duration) {
   return deadline(
     std::chrono::steady_clock::now() +
     std::chrono::duration_cast<
-      std::chrono::steady_clock::duration, std::chrono::steady_clock::rep, std::chrono::steady_clock::period>(
-      duration));
+      std::chrono::steady_clock::duration, std::chrono::steady_clock::rep, std::chrono::steady_clock::period>(duration)
+  );
 }
 
 template<typename Functor>

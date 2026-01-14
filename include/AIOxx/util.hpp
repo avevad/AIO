@@ -11,12 +11,14 @@ namespace AIO {
 assertion_failed(const std::string &what, std::source_location where = std::source_location::current());
 
 [[noreturn]] void assertion_failed(
-  const std::string &what, const std::exception &e, std::source_location where = std::source_location::current());
+  const std::string &what, const std::exception &e, std::source_location where = std::source_location::current()
+);
 
 void issue_warning(const std::string &what, std::source_location where = std::source_location::current());
 
 void issue_warning(
-  const std::string &what, const std::exception &e, std::source_location where = std::source_location::current());
+  const std::string &what, const std::exception &e, std::source_location where = std::source_location::current()
+);
 
 template<typename Derived, typename Derived1>
 class Bound {
