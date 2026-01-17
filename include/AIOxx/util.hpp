@@ -5,19 +5,24 @@
 #include <optional>
 #include <source_location>
 #include <string>
+#include <utility>
 
 #ifdef AIOXX_DEBUG
 #define AIOXX_ASSUME(WHAT)                                                                                             \
   do {                                                                                                                 \
     if (!(WHAT)) {                                                                                                     \
-      AIO::panic(std::string("assumption failed: ") + #WHAT);                                                               \
+      AIO::panic(std::string("assumption failed: ") + #WHAT);                                                          \
     }                                                                                                                  \
   } while (0)
 #else
-#define AIO_ASSUME(WHAT) [[assume(WHAT)]]
+#define AIOXX_ASSUME(WHAT) [[assume(WHAT)]]
 #endif
 
-#define AIOXX_UNREACHABLE AIOXX_ASSUME(false)
+#define AIOXX_UNREACHABLE                                                                                              \
+  do {                                                                                                                 \
+    AIOXX_ASSUME(false);                                                                                               \
+    std::unreachable();                                                                                                \
+  } while (0)
 
 namespace AIO {
 
@@ -118,7 +123,7 @@ struct ExpectedResult {
   template<typename Res1>
   using Mapped = ExpectedResult<Res1>;
 
-  bool is_ok() {
+  bool is_ok() const {
     return expected.has_value();
   }
 
@@ -136,11 +141,15 @@ struct ExpectedResult {
   }
 
   template<typename R = Res>
-  static ExpectedResult make_ok(R res) requires (!std::is_void_v<Res>) {
+  static ExpectedResult make_ok(R res)
+    requires(!std::is_void_v<Res>)
+  {
     return {.expected = std::move(res)};
   }
 
-  static ExpectedResult make_ok() requires (std::is_void_v<Res>) {
+  static ExpectedResult make_ok()
+    requires(std::is_void_v<Res>)
+  {
     return {.expected = {}};
   }
 
