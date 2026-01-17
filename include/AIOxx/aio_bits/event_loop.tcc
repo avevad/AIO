@@ -24,7 +24,7 @@ Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::execute(Functor &
         std::move(promise).fulfill();
       }
     } catch (...) {
-      std::move(promise).fail(std::current_exception());
+      std::move(promise).set(ExpectedResult<Res>::make_err_from_current());
     }
   };
   auto coro = std::make_shared<CoroutineHolder>(std::move(job));
@@ -49,25 +49,19 @@ Res BasicEventLoop::await(Future<Res> future) {
 
   auto task = [this, coro = current_coro.value()] mutable { do_coroutine_step(std::move(coro)); };
 
-  std::optional<WrappedResult<Res>> result = std::nullopt;
-  std::exception_ptr error = nullptr;
-  auto consumer = [this, task = std::move(task), &result, &error](MaybeResult<Res> maybe_res) mutable {
-    if (auto *res = std::get_if<WrappedResult<Res>>(&maybe_res)) {
-      result.emplace(std::move(*res));
-    } else {
-      error = std::get<std::exception_ptr>(maybe_res);
-    }
+  ExpectedResult<Res> result;
+  std::move(future).consume_with([this, task = std::move(task), &result](ExpectedResult<Res> result1) mutable {
+    result = std::move(result1);
     pending_tasks.push(std::move(task));
-  };
-  std::move(future).consume(std::move(consumer));
+  });
 
   current_coro.value()->wrapped.yield();
 
-  if (error) [[unlikely]] {
-    std::rethrow_exception(error);
+  if (!result.is_ok()) [[unlikely]] {
+    std::rethrow_exception(result.move_as_err());
   }
 
-  return result.value().move_out();
+  return result.move_as_ok();
 }
 
 template<typename Rep, typename Period>
