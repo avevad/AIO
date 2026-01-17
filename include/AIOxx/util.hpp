@@ -33,82 +33,83 @@ void warning(
 );
 
 template<typename Derived, typename Derived1>
-class Bound {
+class Bond {
 public:
-  Bound() = default;
+  Bond() = default;
 
-  Bound(const Bound &) = delete;
-  Bound &operator=(const Bound &) = delete;
+  Bond(const Bond &) = delete;
+  Bond &operator=(const Bond &) = delete;
 
-  Bound(Bound &&other) noexcept : bond(other.bond) {
-    other.bond.reset();
-    if (auto bound = get_bound_base_ptr()) {
-      bound->bond = static_cast<Derived *>(this);
+  Bond(Bond &&other) noexcept : maybe_ptr(other.maybe_ptr) {
+    other.maybe_ptr.reset();
+    if (auto bound = get_base_ptr()) {
+      bound->maybe_ptr = static_cast<Derived *>(this);
     }
   }
 
-  Bound &operator=(Bound &&other) noexcept {
+  Bond &operator=(Bond &&other) noexcept {
     if (&other == this) {
       return *this;
     }
 
-    if (auto bound = get_bound_base_ptr()) {
-      bound->bond = nullptr;
+    if (auto bound = get_base_ptr()) {
+      bound->maybe_ptr = nullptr;
     }
 
-    bond = other.bond;
-    other.bond.reset();
-    if (auto bound = get_bound_base_ptr()) {
-      bound->bond = static_cast<Derived *>(this);
+    maybe_ptr = other.maybe_ptr;
+    other.maybe_ptr.reset();
+    if (auto bound = get_base_ptr()) {
+      bound->maybe_ptr = static_cast<Derived *>(this);
     }
 
     return *this;
   }
 
-  ~Bound() {
-    if (auto bound = get_bound_base_ptr()) {
-      bound->bond = nullptr;
+  ~Bond() {
+    if (auto bound = get_base_ptr()) {
+      bound->maybe_ptr = nullptr;
     }
   }
 
 protected:
+  bool is_initialized() {
+    return maybe_ptr.has_value();
+  }
+
   bool is_bound() {
-    return bond.has_value() && bond.value();
+    AIOXX_ASSUME(is_initialized());
+    return maybe_ptr != nullptr;
   }
 
-  bool was_bound() {
-    return bond.has_value();
+  Derived1 *get_ptr() {
+    AIOXX_ASSUME(is_initialized());
+    return *maybe_ptr;
   }
 
-  Derived1 *get_bound_ptr() {
+  Derived1 &get() {
     AIOXX_ASSUME(is_bound());
-    return bond.value();
-  }
-
-  Derived1 &get_bound_obj() {
-    AIOXX_ASSUME(is_bound());
-    return *bond.value();
+    return **maybe_ptr;
   }
 
 private:
   template<typename A, typename B>
-    requires(std::derived_from<A, Bound<A, B>> && std::derived_from<B, Bound<B, A>>)
+    requires(std::derived_from<A, Bond<A, B>> && std::derived_from<B, Bond<B, A>>)
   friend void bind(A &a, B &b);
 
-  friend class Bound<Derived1, Derived>;
+  friend class Bond<Derived1, Derived>;
 
-  Bound<Derived1, Derived> *get_bound_base_ptr() {
-    return bond.has_value() ? static_cast<Bound<Derived1, Derived> *>(bond.value()) : nullptr;
+  Bond<Derived1, Derived> *get_base_ptr() {
+    return maybe_ptr.has_value() ? static_cast<Bond<Derived1, Derived> *>(*maybe_ptr) : nullptr;
   }
 
-  std::optional<Derived1 *> bond = std::nullopt;
+  std::optional<Derived1 *> maybe_ptr = std::nullopt;
 };
 
 template<typename A, typename B>
-  requires(std::derived_from<A, Bound<A, B>> && std::derived_from<B, Bound<B, A>>)
+  requires(std::derived_from<A, Bond<A, B>> && std::derived_from<B, Bond<B, A>>)
 void bind(A &a, B &b) {
-  AIOXX_ASSUME(!a.bond.has_value() && !b.bond.has_value());
-  a.bond = &b;
-  b.bond = &a;
+  AIOXX_ASSUME(!a.is_initialized() && !b.is_initialized());
+  a.maybe_ptr = &b;
+  b.maybe_ptr = &a;
 }
 } // namespace AIO

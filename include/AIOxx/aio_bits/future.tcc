@@ -102,7 +102,7 @@ PromiseBase<Res, Derived> &PromiseBase<Res, Derived>::operator=(PromiseBase &&ot
 
 template<FutureResult Res, typename Derived>
 void PromiseBase<Res, Derived>::fail(std::exception_ptr error) && {
-  AIOXX_ASSUME(BoundBase::was_bound());
+  AIOXX_ASSUME(BoundBase::is_initialized());
   AIOXX_ASSUME(!fulfilled);
 
   fulfilled = true;
@@ -110,7 +110,7 @@ void PromiseBase<Res, Derived>::fail(std::exception_ptr error) && {
   if (consumer.has_value()) {
     consumer.value()(std::move(error));
   } else {
-    BoundBase::get_bound_obj().error = std::move(error);
+    BoundBase::get().error = std::move(error);
   }
 }
 
@@ -198,7 +198,7 @@ Future<Res1> Future<Res>::map(Functor &&fun) && {
 
 template<FutureResult Res>
 void Future<Res>::consume(typename Base::Consumer consumer) && {
-  AIOXX_ASSUME(Base::BoundBase::was_bound());
+  AIOXX_ASSUME(Base::BoundBase::is_initialized());
   AIOXX_ASSUME(!Base::awaited);
 
   Base::awaited = true;
@@ -209,7 +209,7 @@ void Future<Res>::consume(typename Base::Consumer consumer) && {
     consumer(Base::error);
   }
   if (Base::BoundBase::is_bound()) {
-    Base::BoundBase::get_bound_obj().consumer = std::move(consumer);
+    Base::BoundBase::get().consumer = std::move(consumer);
   }
 }
 
@@ -265,7 +265,7 @@ Future<Res1> Future<void>::map(Functor &&fun) && {
 }
 
 inline void Future<void>::consume(typename Base::Consumer consumer) && {
-  AIOXX_ASSUME(Base::BoundBase::was_bound());
+  AIOXX_ASSUME(Base::BoundBase::is_initialized());
   AIOXX_ASSUME(!Base::awaited);
 
   Base::awaited = true;
@@ -275,13 +275,13 @@ inline void Future<void>::consume(typename Base::Consumer consumer) && {
   } else if (Base::error) {
     consumer(Base::error);
   } else {
-    Base::BoundBase::get_bound_obj().consumer = std::move(consumer);
+    Base::BoundBase::get().consumer = std::move(consumer);
   }
 }
 
 template<FutureResult Res>
 void Promise<Res>::fulfill(Res res) && {
-  AIOXX_ASSUME(Base::BoundBase::was_bound());
+  AIOXX_ASSUME(Base::BoundBase::is_initialized());
   AIOXX_ASSUME(!Base::fulfilled);
 
   Base::fulfilled = true;
@@ -289,12 +289,12 @@ void Promise<Res>::fulfill(Res res) && {
   if (Base::consumer.has_value()) {
     Base::consumer.value()(WrappedResult<Res>{std::move(res)});
   } else {
-    Base::BoundBase::get_bound_obj().result.emplace(std::move(res));
+    Base::BoundBase::get().result.emplace(std::move(res));
   }
 }
 
 inline void Promise<void>::fulfill() && {
-  AIOXX_ASSUME(Base::BoundBase::was_bound());
+  AIOXX_ASSUME(Base::BoundBase::is_initialized());
   AIOXX_ASSUME(!Base::fulfilled);
 
   Base::fulfilled = true;
@@ -302,7 +302,7 @@ inline void Promise<void>::fulfill() && {
   if (Base::consumer.has_value()) {
     Base::consumer.value()(WrappedResult<void>{});
   } else {
-    Base::BoundBase::get_bound_obj().result = WrappedResult<void>{};
+    Base::BoundBase::get().result = WrappedResult<void>{};
   }
 }
 

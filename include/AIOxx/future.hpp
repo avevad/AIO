@@ -41,7 +41,7 @@ namespace _impl {
   class PromiseBase;
 
   template<FutureResult Res, typename Derived>
-  class FutureBase : public Bound<Derived, Promise<Res>> {
+  class FutureBase : public Bond<Derived, Promise<Res>> {
   public:
     using Result = Res;
 
@@ -57,7 +57,7 @@ namespace _impl {
     ~FutureBase();
 
   private:
-    using BoundBase = Bound<Derived, Promise<Res>>;
+    using BoundBase = Bond<Derived, Promise<Res>>;
     using Consumer = std::move_only_function<void(MaybeResult<Res>)>;
 
     friend Promise<Res>;
@@ -71,7 +71,7 @@ namespace _impl {
   };
 
   template<FutureResult Res, typename Derived>
-  class PromiseBase : public Bound<Derived, Future<Res>> {
+  class PromiseBase : public Bond<Derived, Future<Res>> {
   public:
     using Result = Res;
 
@@ -87,7 +87,7 @@ namespace _impl {
     ~PromiseBase();
 
   private:
-    using BoundBase = Bound<Derived, Future<Res>>;
+    using BoundBase = Bond<Derived, Future<Res>>;
     using Consumer = typename Future<Res>::Consumer;
 
     friend Future<Res>;
