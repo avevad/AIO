@@ -120,7 +120,7 @@ void StreamSocketFD::shutdown(bool read, bool write) const {
   } else if (write) {
     how = SHUT_WR;
   } else {
-    assertion_failed("invalid shutdown mode");
+    AIOXX_UNREACHABLE;
   }
   ::shutdown(get_sys_fd(), how);
 }

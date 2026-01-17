@@ -30,7 +30,7 @@ void switch_to_context(context_t &ctx) {
 }
 
 void _sysv_amd64::aio_context_trap() {
-  assertion_failed("attempt to switch into dead context");
+  AIOXX_UNREACHABLE;
 }
 
 

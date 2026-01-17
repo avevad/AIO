@@ -4,7 +4,6 @@ project(AIOxx LANGUAGES CXX ASM)
 cmake_policy(SET CMP0077 NEW)
 
 option(AIOXX_BUILD_TESTS            "Build AIO++ unittests" ON)
-option(AIOXX_RUNTIME_WARNINGS       "Enable AIO++ runtime warnings in stderr" ON)
 option(AIOXX_INSTALL                "Enable AIO++ installation" ON)
 
 set(CMAKE_CXX_STANDARD              23)
@@ -26,8 +25,8 @@ if (AIOXX_BUILD_TESTS)
     FetchContent_MakeAvailable(googletest)
 endif ()
 
-if (AIOXX_RUNTIME_WARNINGS)
-    add_compile_definitions(AIOXX_OPT_RUNTIME_WARNINGS=1)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(AIOXX_DEBUG=1)
 endif ()
 
 # Shared library

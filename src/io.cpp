@@ -31,7 +31,7 @@ IOTasksQueue::Handle::Handle(SystemFD fd, IOTasksQueue &queue, TaskCallback call
 IOTasksQueue::IOTasksQueue() {
   ep_fd = epoll_create1(EPOLL_CLOEXEC);
   if (ep_fd < 0) {
-    assertion_failed(strerror(errno));
+    panic(strerror(errno));
   }
 }
 
@@ -39,7 +39,7 @@ IOTasksQueue::Handle IOTasksQueue::push(SystemFD fd, TaskCallback callback) {
   Handle handle(fd, *this, std::move(callback));
   epoll_event ep_evt{.events = 0, .data = {.ptr = handle.callback.get()}};
   if (epoll_ctl(ep_fd, EPOLL_CTL_ADD, fd, &ep_evt) == -1) {
-    assertion_failed(strerror(errno));
+    panic(strerror(errno));
   }
   size++;
   return handle;
@@ -60,7 +60,7 @@ void IOTasksQueue::update(Handle &handle, EventTypes event_types) {
     ep_evt.events |= EPOLLHUP;
   }
   if (epoll_ctl(ep_fd, EPOLL_CTL_MOD, handle.fd, &ep_evt) == -1) {
-    assertion_failed(strerror(errno));
+    panic(strerror(errno));
   }
 }
 
@@ -80,7 +80,7 @@ IOTasksQueue::poll(std::optional<std::chrono::time_point<std::chrono::steady_clo
   }
   int result = epoll_wait(ep_fd, &ep_evt, 1, timeout_num);
   if (result < 0) {
-    assertion_failed(strerror(errno));
+    panic(strerror(errno));
   }
   if (result) {
     EventTypes types = 0;
