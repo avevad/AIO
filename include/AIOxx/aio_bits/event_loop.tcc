@@ -45,9 +45,7 @@ auto BasicEventLoop::async(Functor &&fun) {
 
 template<typename Res>
 Res BasicEventLoop::await(Future<Res> future) {
-  if (!current_coro.has_value()) {
-    assertion_failed("attempt to await() outside of event loop");
-  }
+  AIOXX_ASSUME(current_coro.has_value());
 
   auto task = [this, coro = current_coro.value()] mutable { do_coroutine_step(std::move(coro)); };
 
@@ -90,9 +88,7 @@ inline bool BasicEventLoop::TimedTask::operator<(const TimedTask &task1) const {
 }
 
 inline void BasicEventLoop::do_coroutine_step(std::shared_ptr<CoroutineHolder> coro) {
-  if (current_coro.has_value()) {
-    assertion_failed("recursive do_coroutine_step() call");
-  }
+  AIOXX_ASSUME(!current_coro.has_value());
   current_coro = std::move(coro);
   current_coro.value()->wrapped.resume();
   current_coro = std::nullopt;
@@ -111,9 +107,7 @@ inline BasicEventLoop::BasicEventLoop() {
 }
 
 inline void BasicEventLoop::yield() {
-  if (!current_coro) {
-    assertion_failed("attempt to yield outside the event loop");
-  }
+  AIOXX_ASSUME(current_coro);
   auto task = [this, coro = current_coro.value()] mutable { do_coroutine_step(std::move(coro)); };
   pending_tasks.emplace(std::move(task));
   current_coro.value()->wrapped.yield();
@@ -122,7 +116,7 @@ inline void BasicEventLoop::yield() {
 inline void BasicEventLoop::stop() {
   stopped = true;
   yield();
-  assertion_failed("event loop stop trap");
+  AIOXX_UNREACHABLE;
 }
 
 inline const StreamFD &BasicEventLoop::get_stdin() {
@@ -214,9 +208,9 @@ inline void BasicEventLoop::run() {
       break;
     }
   } catch (std::exception &e) {
-    assertion_failed("exception in event loop", e);
+    panic("exception in event loop", e);
   } catch (...) {
-    assertion_failed("unknown exception in event loop");
+    panic("unknown exception in event loop");
   }
 }
 

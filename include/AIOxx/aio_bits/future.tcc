@@ -8,9 +8,7 @@ namespace AIO::_impl {
 
 template<FutureResult Res, typename Derived>
 FutureBase<Res, Derived>::~FutureBase() {
-  if (!awaited) {
-    assertion_failed("destroying non-awaited future");
-  }
+  AIOXX_ASSUME(awaited);
 }
 
 template<FutureResult Res, typename Derived>
@@ -33,9 +31,9 @@ void FutureBase<Res, Derived>::detach() && {
       try {
         std::rethrow_exception(*error);
       } catch (std::exception &e) {
-        issue_warning("unhandled error in detached future", e);
+        warning("unhandled error in detached future", e);
       } catch (...) {
-        issue_warning("unhandled unknown error in detached future");
+        warning("unhandled unknown error in detached future");
       }
     }
   });
@@ -85,7 +83,7 @@ FutureBase<Res, Derived>::FutureBase(FutureBase &&other) noexcept
 template<FutureResult Res, typename Derived>
 PromiseBase<Res, Derived>::~PromiseBase() {
   if (!fulfilled) {
-    issue_warning("destroying non-fulfilled promise");
+    warning("destroying non-fulfilled promise");
   }
 }
 
@@ -104,15 +102,10 @@ PromiseBase<Res, Derived> &PromiseBase<Res, Derived>::operator=(PromiseBase &&ot
 
 template<FutureResult Res, typename Derived>
 void PromiseBase<Res, Derived>::fail(std::exception_ptr error) && {
-  if (!BoundBase::was_bound()) {
-    assertion_failed("promise was not bound to any future");
-  }
+  AIOXX_ASSUME(BoundBase::was_bound());
+  AIOXX_ASSUME(!fulfilled);
 
-  if (!fulfilled) {
-    fulfilled = true;
-  } else {
-    assertion_failed("attempt to fulfill already fulfilled promise");
-  }
+  fulfilled = true;
 
   if (consumer.has_value()) {
     consumer.value()(std::move(error));
@@ -205,15 +198,10 @@ Future<Res1> Future<Res>::map(Functor &&fun) && {
 
 template<FutureResult Res>
 void Future<Res>::consume(typename Base::Consumer consumer) && {
-  if (!Base::BoundBase::was_bound()) {
-    assertion_failed("future was not bound to any promise");
-  }
+  AIOXX_ASSUME(Base::BoundBase::was_bound());
+  AIOXX_ASSUME(!Base::awaited);
 
-  if (!Base::awaited) {
-    Base::awaited = true;
-  } else {
-    assertion_failed("attempt to await already awaited future");
-  }
+  Base::awaited = true;
 
   if (Base::result.has_value()) {
     consumer(std::move(Base::result.value()));
@@ -277,15 +265,10 @@ Future<Res1> Future<void>::map(Functor &&fun) && {
 }
 
 inline void Future<void>::consume(typename Base::Consumer consumer) && {
-  if (!Base::BoundBase::was_bound()) {
-    assertion_failed("future was not bound to any promise");
-  }
+  AIOXX_ASSUME(Base::BoundBase::was_bound());
+  AIOXX_ASSUME(!Base::awaited);
 
-  if (!Base::awaited) {
-    Base::awaited = true;
-  } else {
-    assertion_failed("attempt to await already awaited future");
-  }
+  Base::awaited = true;
 
   if (Base::result.has_value()) {
     consumer(WrappedResult<void>{});
@@ -298,15 +281,10 @@ inline void Future<void>::consume(typename Base::Consumer consumer) && {
 
 template<FutureResult Res>
 void Promise<Res>::fulfill(Res res) && {
-  if (!Base::BoundBase::was_bound()) {
-    assertion_failed("promise was not bound to any future");
-  }
+  AIOXX_ASSUME(Base::BoundBase::was_bound());
+  AIOXX_ASSUME(!Base::fulfilled);
 
-  if (!Base::fulfilled) {
-    Base::fulfilled = true;
-  } else {
-    assertion_failed("attempt to fulfill already fulfilled promise");
-  }
+  Base::fulfilled = true;
 
   if (Base::consumer.has_value()) {
     Base::consumer.value()(WrappedResult<Res>{std::move(res)});
@@ -316,15 +294,10 @@ void Promise<Res>::fulfill(Res res) && {
 }
 
 inline void Promise<void>::fulfill() && {
-  if (!Base::BoundBase::was_bound()) {
-    assertion_failed("promise was not bound to any future");
-  }
+  AIOXX_ASSUME(Base::BoundBase::was_bound());
+  AIOXX_ASSUME(!Base::fulfilled);
 
-  if (!Base::fulfilled) {
-    Base::fulfilled = true;
-  } else {
-    assertion_failed("attempt to fulfill already fulfilled promise");
-  }
+  Base::fulfilled = true;
 
   if (Base::consumer.has_value()) {
     Base::consumer.value()(WrappedResult<void>{});

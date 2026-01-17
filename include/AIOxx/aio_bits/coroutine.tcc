@@ -25,10 +25,8 @@ CoroutineBase<Ret, Arg, Derived>::CoroutineBase(Functor &&fun)
 template<typename Ret, typename Arg, typename Derived>
 template<typename... ResumeArgs>
 Ret CoroutineBase<Ret, Arg, Derived>::resume(ResumeArgs &&...arg) {
-  if (current_coroutine == this)
-    assertion_failed("attempt to resume current coroutine");
-  if (is_dead())
-    assertion_failed("attempt to resume dead coroutine");
+  AIOXX_ASSUME(current_coroutine != this);
+  AIOXX_ASSUME(!is_dead());
 
   return static_cast<Derived *>(this)->resume_impl(std::forward<ResumeArgs>(arg)...);
 }
@@ -36,8 +34,7 @@ Ret CoroutineBase<Ret, Arg, Derived>::resume(ResumeArgs &&...arg) {
 template<typename Ret, typename Arg, typename Derived>
 template<typename... YieldRets>
 Arg CoroutineBase<Ret, Arg, Derived>::yield(YieldRets &&...ret) {
-  if (current_coroutine != this)
-    assertion_failed("attempt to yield another coroutine");
+  AIOXX_ASSUME(current_coroutine == this);
 
   return static_cast<Derived *>(this)->yield_impl(std::forward<YieldRets>(ret)..., false);
 }
@@ -49,10 +46,8 @@ bool CoroutineBase<Ret, Arg, Derived>::is_dead() const {
 
 template<typename Ret, typename Arg, typename Derived>
 void CoroutineBase<Ret, Arg, Derived>::kill() {
-  if (current_coroutine == this)
-    assertion_failed("attempt to kill current coroutine");
-  if (is_dead())
-    assertion_failed("attempt to kill dead coroutine");
+  AIOXX_ASSUME(current_coroutine != this);
+  AIOXX_ASSUME(!is_dead());
 
   state = State::ERROR;
 
@@ -71,7 +66,7 @@ void CoroutineBase<Ret, Arg, Derived>::kill() {
 template<typename Ret, typename Arg, typename Derived>
 CoroutineBase<Ret, Arg, Derived>::~CoroutineBase() {
   if (!is_dead()) {
-    issue_warning("destroying runnable coroutine");
+    warning("destroying runnable coroutine");
   }
 }
 
@@ -273,8 +268,7 @@ template<typename Ret>
 Ret *CoroutineIterator<Ret>::operator->() const {
   obtain_value();
 
-  if (!coro)
-    assertion_failed("dereferencing singular iterator");
+  AIOXX_ASSUME(coro);
 
   return &holder.value();
 }
@@ -283,8 +277,7 @@ template<typename Ret>
 CoroutineIterator<Ret> &CoroutineIterator<Ret>::operator++() {
   obtain_value();
 
-  if (!coro)
-    assertion_failed("incrementing singular iterator");
+  AIOXX_ASSUME(coro);
 
   holder.reset();
 

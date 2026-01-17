@@ -5,18 +5,30 @@
 #include <source_location>
 #include <string>
 
+#ifdef AIOXX_DEBUG
+#define AIOXX_ASSUME(WHAT)                                                                                             \
+  do {                                                                                                                 \
+    if (!(WHAT)) {                                                                                                     \
+      panic(std::string("assumption failed: ") + #WHAT);                                                               \
+    }                                                                                                                  \
+  } while (0)
+#else
+#define AIO_ASSUME(WHAT)                                                                                               \
+  [[assume(WHAT)]]
+#endif
+
+#define AIOXX_UNREACHABLE AIOXX_ASSUME(false)
+
 namespace AIO {
 
+[[noreturn]] void panic(const std::string &what, std::source_location where = std::source_location::current());
+
 [[noreturn]] void
-assertion_failed(const std::string &what, std::source_location where = std::source_location::current());
+panic(const std::string &what, const std::exception &e, std::source_location where = std::source_location::current());
 
-[[noreturn]] void assertion_failed(
-  const std::string &what, const std::exception &e, std::source_location where = std::source_location::current()
-);
+void warning(const std::string &what, std::source_location where = std::source_location::current());
 
-void issue_warning(const std::string &what, std::source_location where = std::source_location::current());
-
-void issue_warning(
+void warning(
   const std::string &what, const std::exception &e, std::source_location where = std::source_location::current()
 );
 
@@ -69,16 +81,12 @@ protected:
   }
 
   Derived1 *get_bound_ptr() {
-    if (!is_bound()) {
-      assertion_failed("accessing non-existent bond");
-    }
+    AIOXX_ASSUME(is_bound());
     return bond.value();
   }
 
   Derived1 &get_bound_obj() {
-    if (!is_bound()) {
-      assertion_failed("accessing non-existent bond");
-    }
+    AIOXX_ASSUME(is_bound());
     return *bond.value();
   }
 
@@ -99,10 +107,7 @@ private:
 template<typename A, typename B>
   requires(std::derived_from<A, Bound<A, B>> && std::derived_from<B, Bound<B, A>>)
 void bind(A &a, B &b) {
-  if (a.bond.has_value() || b.bond.has_value()) {
-    assertion_failed("binding already bound object");
-  }
-
+  AIOXX_ASSUME(!a.bond.has_value() && !b.bond.has_value());
   a.bond = &b;
   b.bond = &a;
 }

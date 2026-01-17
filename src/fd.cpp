@@ -42,9 +42,7 @@ FD &FD::operator=(FD &&other) noexcept {
 
 Future<void> FD::event(Direction direction) const {
   auto &promise_slot = direction == IN ? state->in_promise : state->out_promise;
-  if (promise_slot.has_value()) {
-    assertion_failed("repeated FD::event with same direction");
-  }
+  AIOXX_ASSUME(!promise_slot.has_value());
   Future<void> future;
   Promise<void> promise;
   bind(future, promise);
