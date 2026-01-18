@@ -8,7 +8,8 @@ option(AIOXX_INSTALL                "Enable AIO++ installation" ON)
 
 set(CMAKE_CXX_STANDARD              23)
 set(CMAKE_CXX_STANDARD_REQUIRED     ON)
-set(CMAKE_CXX_FLAGS                 "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Werror -Wno-assume")
+set(CMAKE_CXX_FLAGS                 "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Werror")
+set(CMAKE_CXX_FLAGS                 "${CMAKE_CXX_FLAGS} -Wno-error=character-conversion") # https://github.com/google/googletest/issues/4762
 set(CMAKE_ASM_CREATE_SHARED_LIBRARY ${CMAKE_CXX_CREATE_SHARED_LIBRARY})
 
 include(FetchContent)

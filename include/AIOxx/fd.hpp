@@ -54,8 +54,8 @@ public:
   static StreamFD open(BasicEventLoop &loop, const std::filesystem::path &path, std::ios_base::openmode mode);
   static StreamFD steal_from_system(BasicEventLoop &loop, SystemFD sys_fd);
 
-  StreamFD(StreamFD &&other) noexcept;
-  using FD::operator=;
+  StreamFD(StreamFD &&other) noexcept = default;
+  StreamFD &operator=(StreamFD &&other) noexcept = default;
 
   Future<std::size_t> read(size_t size, char *data) const;
   Future<std::size_t> write(size_t size, const char *data) const;

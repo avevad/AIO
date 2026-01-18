@@ -108,9 +108,6 @@ StreamSocketFD::connect(BasicEventLoop &loop, const std::string &host, const std
   });
 }
 
-StreamSocketFD::StreamSocketFD(StreamSocketFD &&other) noexcept : StreamFD(std::move(other)) {
-}
-
 void StreamSocketFD::shutdown(bool read, bool write) const {
   int how = 0;
   if (read && write) {

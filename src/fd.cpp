@@ -89,9 +89,6 @@ StreamFD StreamFD::steal_from_system(BasicEventLoop &loop, SystemFD sys_fd) {
   return {loop, sys_fd};
 }
 
-StreamFD::StreamFD(StreamFD &&other) noexcept : FD(std::move(other)) {
-}
-
 Future<std::size_t> StreamFD::read(size_t size, char *data) const {
   return event(IN).map_result([fd = get_sys_fd(), data, size] -> size_t {
     auto read_size = ::read(fd, data, size);

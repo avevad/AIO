@@ -7,8 +7,8 @@ class StreamSocketFD : public StreamFD {
 public:
   static Future<StreamSocketFD> connect(BasicEventLoop &loop, const std::string &host, const std::string &service);
 
-  StreamSocketFD(StreamSocketFD &&other) noexcept;
-  using StreamFD::operator=;
+  StreamSocketFD(StreamSocketFD &&other) noexcept = default;
+  StreamSocketFD &operator=(StreamSocketFD &&other) noexcept = default;
 
   void shutdown(bool read = true, bool write = true) const;
 
@@ -23,7 +23,7 @@ private:
 class StreamServerFD : public FD {
 public:
   StreamServerFD(StreamServerFD &&other) noexcept;
-  using FD::operator=;
+  StreamServerFD &operator=(StreamServerFD &&other) noexcept = default;
 
   StreamServerFD(BasicEventLoop &loop, const std::string &host, const std::string &service);
 
