@@ -2,7 +2,6 @@
 
 #include <functional>
 #include <type_traits>
-#include <variant>
 
 #include "util.hpp"
 
@@ -12,162 +11,215 @@ class BasicEventLoop;
 template<typename Res>
 concept FutureResult = !std::is_reference_v<Res>;
 
-template<FutureResult Res>
-class Promise;
-
-template<FutureResult Res>
-class Future;
-
-template<typename Res>
-struct WrappedResult {
-  Res obj;
-
-  auto move_out() {
-    return std::move(obj);
-  }
-};
-
-template<>
-struct WrappedResult<void> {
-  void move_out() {
-  }
-};
-
-template<typename Res>
-using MaybeResult = std::variant<WrappedResult<Res>, std::exception_ptr>;
-
 namespace _impl {
-  template<FutureResult Res, typename Derived>
+  template<FutureResult Res, typename Promise, typename Future>
   class PromiseBase;
 
-  template<FutureResult Res, typename Derived>
-  class FutureBase : public Bond<Derived, Promise<Res>> {
-  public:
-    using Result = Res;
+  template<FutureResult Res, typename Future, typename Promise>
+  class FutureBase : public Bond<FutureBase<Res, Future, Promise>, PromiseBase<Res, Promise, Future>> {
+    using Bond = Bond<FutureBase, PromiseBase<Res, Promise, Future>>;
 
+  public:
     FutureBase() = default;
     FutureBase(FutureBase &&other) noexcept;
     FutureBase &operator=(FutureBase &&other) noexcept;
 
-    void detach() &&;
+    FutureBase(const FutureBase &) = delete;
+    FutureBase &operator=(const FutureBase &) = delete;
 
-    template<typename Error, typename ErrorHandler>
-    Future<Res> except(ErrorHandler &&handler);
+    template<typename P>
+    void bind_to(P &promise);
+
+    [[nodiscard]] bool is_free() const;
 
     ~FutureBase();
 
+  protected:
+    using Result = Res;
+    using ExpectedResult = ExpectedResult<Res>;
+    using Consumer = std::move_only_function<void(ExpectedResult)>;
+
+    template<typename AsyncFunctor, typename Res1 = std::invoke_result_t<AsyncFunctor, Res>::Result>
+    auto then(AsyncFunctor &&functor) &&;
+
+    template<typename Exception, typename AsyncHandler>
+    Future except(AsyncHandler &&handler) &&;
+
+    template<typename AsyncHandler>
+    Future except_any(AsyncHandler &&handler) &&;
+
+    template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Res>>
+    auto map_result(Functor &&functor) &&;
+
+    template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<Res>>::value_type>
+    auto map_expected(Functor &&functor) &&;
+
+    void detach() &&;
+
   private:
-    using BoundBase = Bond<Derived, Promise<Res>>;
-    using Consumer = std::move_only_function<void(MaybeResult<Res>)>;
+    template<FutureResult Res1, typename Future1, typename Promise1>
+    friend class FutureBase;
+    template<FutureResult Res1, typename Promise1, typename Future1>
+    friend class PromiseBase;
 
-    friend Promise<Res>;
-    friend PromiseBase<Res, Promise<Res>>;
-    friend BasicEventLoop;
-    friend Derived;
+    template<typename Consumer>
+    void consume_with(Consumer &&consumer) &&;
 
-    bool awaited = false;
-    std::optional<WrappedResult<Res>> result = std::nullopt;
-    std::exception_ptr error = nullptr;
+    std::optional<ExpectedResult> maybe_result = std::nullopt;
   };
 
-  template<FutureResult Res, typename Derived>
-  class PromiseBase : public Bond<Derived, Future<Res>> {
-  public:
-    using Result = Res;
+  template<FutureResult Res, typename Promise, typename Future>
+  class PromiseBase : public Bond<PromiseBase<Res, Promise, Future>, FutureBase<Res, Future, Promise>> {
+    using Bond = Bond<PromiseBase, FutureBase<Res, Future, Promise>>;
 
+  public:
     PromiseBase() = default;
     PromiseBase(PromiseBase &&other) noexcept;
     PromiseBase &operator=(PromiseBase &&other) noexcept;
 
-    void fail(std::exception_ptr error) &&;
-    void propagate(MaybeResult<Res> maybe_res) &&;
+    PromiseBase(const PromiseBase &) = delete;
+    PromiseBase &operator=(const PromiseBase &) = delete;
 
-    [[nodiscard]] bool is_fulfilled();
+    template<typename F>
+    void bind_to(F &future);
+
+    [[nodiscard]] bool is_free() const;
 
     ~PromiseBase();
 
+  protected:
+    using Result = Res;
+    using ExpectedResult = ExpectedResult<Res>;
+    using Consumer = std::move_only_function<void(ExpectedResult)>;
+
+    template<typename Exception>
+    void fail(const Exception &e) &&;
+
+    void fail_any(std::exception_ptr err) &&;
+
+    void fulfill(Result res) &&;
+
   private:
-    using BoundBase = Bond<Derived, Future<Res>>;
-    using Consumer = typename Future<Res>::Consumer;
+    template<FutureResult Res1, typename Future1, typename Promise1>
+    friend class FutureBase;
+    template<FutureResult Res1, typename Promise1, typename Future1>
+    friend class PromiseBase;
 
-    friend Future<Res>;
-    friend FutureBase<Res, Future<Res>>;
-    friend BasicEventLoop;
-    friend Derived;
+    void set(ExpectedResult result) &&;
 
-    bool fulfilled = false;
-    std::optional<Consumer> consumer = std::nullopt;
+    std::optional<Consumer> maybe_consumer = std::nullopt;
   };
 
+  struct Void {};
 } // namespace _impl
 
 template<FutureResult Res>
-class Future final : public _impl::FutureBase<Res, Future<Res>> {
-  using Base = _impl::FutureBase<Res, Future>;
+class Promise;
+
+template<FutureResult Res>
+class [[nodiscard]] Future final : public _impl::FutureBase<Res, Future<Res>, Promise<Res>> {
+  using FutureBase = _impl::FutureBase<Res, Future, Promise<Res>>;
 
 public:
-  using Base::Base;
+  template<typename Res1>
+  using Mapped = Future<Res1>;
+  using Result = Res;
 
-  void consume(typename Base::Consumer consumer) &&;
+  using FutureBase::FutureBase;
 
-  template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor, Res>::Result>
-  Future<Res1> then(AsyncFunctor &&fun) &&;
+  explicit Future(Future<void> &&other) noexcept;
+
+  template<typename AsyncFunctor, typename Res1 = std::invoke_result_t<AsyncFunctor, Res>::Result>
+  Future<Res1> then(AsyncFunctor &&functor) &&;
+
+  using FutureBase::except;
+
+  using FutureBase::except_any;
 
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Res>>
-  Future<Res1> map(Functor &&fun) &&;
+  Mapped<Res1> map_result(Functor &&functor) &&;
 
-private:
-  friend Base;
+  template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<Res>>::value_type>
+  Mapped<Res1> map_expected(Functor &&functor) &&;
+
+  using FutureBase::detach;
 };
 
 template<>
-class Future<void> final : public _impl::FutureBase<void, Future<void>> {
-  using Base = _impl::FutureBase<void, Future>;
-
+class [[nodiscard]] Future<void> final : public _impl::FutureBase<_impl::Void, Future<_impl::Void>, Promise<_impl::Void>> {
 public:
-  using Base::Base;
+  template<typename Res1>
+  using Mapped = Future<Res1>;
+  using Result = void;
 
-  void consume(typename Base::Consumer consumer) &&;
+  using FutureBase::FutureBase;
 
-  template<typename AsyncFunctor, typename Res1 = typename std::invoke_result_t<AsyncFunctor>::Result>
-  Future<Res1> then(AsyncFunctor &&fun) &&;
+  explicit Future(Future<_impl::Void> &&other) noexcept;
+
+  template<typename AsyncFunctor, typename Res1 = std::invoke_result_t<AsyncFunctor>::Result>
+  Future<Res1> then(AsyncFunctor &&functor) &&;
+
+  template<typename Exception, typename AsyncHandler>
+  Future except(AsyncHandler &&handler) &&;
+
+  template<typename AsyncHandler>
+  Future except_any(AsyncHandler &&handler) &&;
 
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor>>
-  Future<Res1> map(Functor &&fun) &&;
+  Mapped<Res1> map_result(Functor &&functor) &&;
 
-private:
-  friend Base;
+  template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<void>>::value_type>
+  Mapped<Res1> map_expected(Functor &&functor) &&;
+
+  using FutureBase::detach;
 };
 
 template<FutureResult Res>
-class Promise final : public _impl::PromiseBase<Res, Promise<Res>> {
-  using Base = _impl::PromiseBase<Res, Promise>;
+class [[nodiscard]] Promise final : public _impl::PromiseBase<Res, Promise<Res>, Future<Res>> {
+  using PromiseBase = _impl::PromiseBase<Res, Promise, Future<Res>>;
 
 public:
-  using Base::Base;
+  template<typename Res1>
+  using Mapped = Promise<Res1>;
+  using Result = PromiseBase::Result;
 
-  void fulfill(Res res) &&;
+  using PromiseBase::PromiseBase;
 
-private:
-  friend Base;
+  using PromiseBase::fail;
+
+  using PromiseBase::fail_any;
+
+  using PromiseBase::fulfill;
 };
 
 template<>
-class Promise<void> final : public _impl::PromiseBase<void, Promise<void>> {
-  using Base = _impl::PromiseBase<void, Promise>;
-
+class [[nodiscard]] Promise<void> final : public _impl::PromiseBase<_impl::Void, Promise<_impl::Void>, Future<_impl::Void>> {
 public:
-  using Base::Base;
+  template<typename Res1>
+  using Mapped = Promise<Res1>;
+  using Result = void;
+
+  using PromiseBase::PromiseBase;
+
+  using PromiseBase::fail;
+
+  using PromiseBase::fail_any;
 
   void fulfill() &&;
-
-private:
-  friend Base;
 };
 
-template<typename Res, typename Res1>
-Future<bool> operator|(Future<Res> &&future, Future<Res1> &&future1);
+template<typename Res>
+class Contract {
+public:
+  Contract();
 
+  Promise<Res> promise = {};
+  Future<Res> future = {};
+};
+
+// TODO: this is ugly and wrong, should be refactored after implementing Future.cancel()
+template<typename Res, typename Res1>
+Future<bool> operator|(Future<Res> &&future1, Future<Res1> &&future2);
 } // namespace AIO
 
 #include "aio_bits/future.tcc"

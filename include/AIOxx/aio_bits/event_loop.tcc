@@ -9,11 +9,7 @@ namespace AIO {
 template<typename Functor, typename... Args>
 Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::execute(Functor &&fun, Args &&...args) {
   using Res = std::invoke_result_t<Functor, Args...>;
-
-  Future<Res> future;
-  Promise<Res> promise;
-  AIO::bind(future, promise);
-
+  auto [promise, future] = Contract<Res>();
   auto job = [fun = std::forward<Functor>(fun), args = std::tuple<Args...>(std::forward<Args>(args)...),
               promise = std::move(promise)] mutable {
     try {
@@ -24,15 +20,16 @@ Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::execute(Functor &
         std::move(promise).fulfill();
       }
     } catch (...) {
-      std::move(promise).fail(std::current_exception());
+      std::move(promise).fail_any(std::current_exception());
     }
   };
+
   auto coro = std::make_shared<CoroutineHolder>(std::move(job));
 
   auto task = [this, coro = std::move(coro)] mutable { do_coroutine_step(std::move(coro)); };
   pending_tasks.push(std::move(task));
 
-  return future;
+  return std::move(future);
 }
 
 template<typename Functor>
@@ -49,25 +46,24 @@ Res BasicEventLoop::await(Future<Res> future) {
 
   auto task = [this, coro = current_coro.value()] mutable { do_coroutine_step(std::move(coro)); };
 
-  std::optional<WrappedResult<Res>> result = std::nullopt;
-  std::exception_ptr error = nullptr;
-  auto consumer = [this, task = std::move(task), &result, &error](MaybeResult<Res> maybe_res) mutable {
-    if (auto *res = std::get_if<WrappedResult<Res>>(&maybe_res)) {
-      result.emplace(std::move(*res));
-    } else {
-      error = std::get<std::exception_ptr>(maybe_res);
-    }
-    pending_tasks.push(std::move(task));
-  };
-  std::move(future).consume(std::move(consumer));
+  Expected<Res> expected = std::unexpected<std::exception_ptr>(nullptr);
+  std::move(future)
+    .map_expected([this, task = std::move(task), &expected](std::expected<Res, std::exception_ptr> expected1) mutable {
+      expected = std::move(expected1);
+      pending_tasks.push(std::move(task));
+      return std::expected<void, std::exception_ptr>{};
+    })
+    .detach();
 
   current_coro.value()->wrapped.yield();
 
-  if (error) [[unlikely]] {
-    std::rethrow_exception(error);
+  if (!expected.has_value()) {
+    std::rethrow_exception(expected.error());
   }
 
-  return result.value().move_out();
+  if constexpr (!std::is_void_v<Res>) {
+    return std::move(*expected);
+  }
 }
 
 template<typename Rep, typename Period>
@@ -141,21 +137,15 @@ inline const StreamFD &BasicEventLoop::get_stderr() {
 }
 
 inline Future<void> BasicEventLoop::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
-  Future<void> future;
-  Promise<void> promise;
-  AIO::bind(future, promise);
-
+  auto [promise, future] = Contract<void>();
   auto task = [promise = std::move(promise)] mutable { std::move(promise).fulfill(); };
   pending_timed_tasks.emplace(time, std::move(task));
-
-  return future;
+  return std::move(future);
 }
 
 inline Future<void> BasicEventLoop::forever() {
   return execute([this] {
-    Future<void> future;
-    Promise<void> promise;
-    bind(future, promise);
+    auto [promise, future] = Contract<void>();
     await(std::move(future));
   });
 }

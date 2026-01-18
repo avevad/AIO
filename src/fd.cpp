@@ -43,14 +43,12 @@ FD &FD::operator=(FD &&other) noexcept {
 Future<void> FD::event(Direction direction) const {
   auto &promise_slot = direction == IN ? state->in_promise : state->out_promise;
   AIOXX_ASSUME(!promise_slot.has_value());
-  Future<void> future;
-  Promise<void> promise;
-  bind(future, promise);
+  auto [promise, future] = Contract<void>();
   promise_slot = std::move(promise);
   state->io_handle.value().update(
     (state->in_promise.has_value() ? IOTasksQueue::IN : 0) | (state->out_promise.has_value() ? IOTasksQueue::OUT : 0)
   );
-  return future;
+  return std::move(future);
 }
 
 FD::FD(BasicEventLoop &loop, SystemFD sys_fd) : fd(sys_fd), state(nullptr) {
@@ -91,11 +89,8 @@ StreamFD StreamFD::steal_from_system(BasicEventLoop &loop, SystemFD sys_fd) {
   return {loop, sys_fd};
 }
 
-StreamFD::StreamFD(StreamFD &&other) noexcept : FD(std::move(other)) {
-}
-
 Future<std::size_t> StreamFD::read(size_t size, char *data) const {
-  return event(IN).map([fd = get_sys_fd(), data, size] -> size_t {
+  return event(IN).map_result([fd = get_sys_fd(), data, size] -> size_t {
     auto read_size = ::read(fd, data, size);
     if (read_size < 0) {
       throw SystemError(std::string("read: ") + strerror(errno));
@@ -105,7 +100,7 @@ Future<std::size_t> StreamFD::read(size_t size, char *data) const {
 }
 
 Future<std::size_t> StreamFD::write(size_t size, const char *data) const {
-  return event(OUT).map([fd = get_sys_fd(), data, size] -> size_t {
+  return event(OUT).map_result([fd = get_sys_fd(), data, size] -> size_t {
     auto write_size = ::write(fd, data, size);
     if (write_size < 0) {
       throw SystemError(std::string("write: ") + strerror(errno));

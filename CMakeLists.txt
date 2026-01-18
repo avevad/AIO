@@ -11,6 +11,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED     ON)
 set(CMAKE_CXX_FLAGS                 "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Werror")
 set(CMAKE_ASM_CREATE_SHARED_LIBRARY ${CMAKE_CXX_CREATE_SHARED_LIBRARY})
 
+# https://github.com/google/googletest/issues/4762
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if(NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "21.0.0")
+        set(CMAKE_CXX_FLAGS         "${CMAKE_CXX_FLAGS} -Wno-error=assume -Wno-error=character-conversion")
+    endif()
+endif ()
+
 include(FetchContent)
 
 if (AIOXX_BUILD_TESTS)
