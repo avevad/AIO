@@ -73,8 +73,6 @@ namespace _impl {
     PromiseBase(const PromiseBase &) = delete;
     PromiseBase &operator=(const PromiseBase &) = delete;
 
-    bool is_fulfilled() const;
-
     ~PromiseBase();
 
   protected:

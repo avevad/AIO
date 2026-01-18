@@ -181,13 +181,8 @@ namespace _impl {
   }
 
   template<FutureResult Res, typename Promise, typename Future>
-  bool PromiseBase<Res, Promise, Future>::is_fulfilled() const {
-    return fulfilled;
-  }
-
-  template<FutureResult Res, typename Promise, typename Future>
   PromiseBase<Res, Promise, Future>::~PromiseBase() {
-    if (!is_fulfilled()) {
+    if (!fulfilled) {
       warning("destroying non-fulfilled promise");
     }
   }
@@ -344,29 +339,38 @@ inline Future<_impl::Void> _impl::fake_void(Future<void> future) {
 
 // TODO: this is ugly and wrong, should be refactored after implementing Future.cancel()
 template<typename Res, typename Res1>
-Future<bool> operator|(Future<Res> &&future, Future<Res1> &&future1) {
-  Future<bool> result;
-  auto promise = std::make_shared<Promise<bool>>();
-  bind(result, *promise);
+Future<bool> operator|(Future<Res> &&future1, Future<Res1> &&future2) {
+  Future<bool> future;
+  Promise<bool> promise;
+  AIO::bind(future, promise);
 
-  std::move(future)
-    .map_expected([promise](auto...) mutable {
-      if (!promise->is_fulfilled()) {
-        std::move(*promise).fulfill(true);
-      }
-      return Expected<void>{};
-    })
-    .detach();
+  struct State {
+    Promise<bool> promise;
+    bool done;
+  };
+  std::shared_ptr<State> state = std::make_shared<State>();
+  state->promise = std::move(promise);
 
   std::move(future1)
-    .map_expected([promise](auto...) mutable {
-      if (!promise->is_fulfilled()) {
-        std::move(*promise).fulfill(false);
+    .map_expected([state](auto...) mutable {
+      if (!state->done) {
+        state->done = true;
+        std::move(state->promise).fulfill(true);
       }
       return Expected<void>{};
     })
     .detach();
 
-  return result;
+  std::move(future2)
+    .map_expected([state](auto...) mutable {
+      if (!state->done) {
+        state->done = true;
+        std::move(state->promise).fulfill(false);
+      }
+      return Expected<void>{};
+    })
+    .detach();
+
+  return future;
 }
 } // namespace AIO
