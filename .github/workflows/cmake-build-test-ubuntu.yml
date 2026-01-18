@@ -19,6 +19,9 @@ jobs:
     - name: Install toolchain
       run: sudo apt update && sudo apt install clang
 
+    - name: Print toolchain version
+      run: clang --version
+
     - name: Configure CMake
       run: >
         cmake -B ${{github.workspace}}/build 
