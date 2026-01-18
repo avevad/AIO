@@ -43,7 +43,7 @@ Future<std::optional<char>> BufferedStreamFD<BaseFD>::read_byte() const {
   Future<bool> byte_ready;
   if (i_sz == 0) {
     i_beg = 0;
-    byte_ready = read_some(i_cap, i_buf.get()).map([this](size_t size) -> bool {
+    byte_ready = read_some(i_cap, i_buf.get()).map_result([this](size_t size) -> bool {
       if (size == 0) {
         return false;
       }
@@ -55,7 +55,7 @@ Future<std::optional<char>> BufferedStreamFD<BaseFD>::read_byte() const {
     AIO::bind(byte_ready, promise);
     std::move(promise).fulfill(true);
   }
-  return std::move(byte_ready).map([this](bool has_byte) -> std::optional<char> {
+  return std::move(byte_ready).map_result([this](bool has_byte) -> std::optional<char> {
     if (!has_byte) {
       return std::nullopt;
     }
@@ -115,7 +115,7 @@ Future<std::size_t> BufferedStreamFD<BaseFD>::write(size_t size, const char *dat
 
 template<std::derived_from<StreamFD> BaseFD>
 Future<void> BufferedStreamFD<BaseFD>::write_string(std::string_view str) const {
-  return write(str.size(), str.data()).map([str](size_t written) {
+  return write(str.size(), str.data()).map_result([str](size_t written) {
     if (written != str.size()) {
       throw SystemError("end of stream");
     }

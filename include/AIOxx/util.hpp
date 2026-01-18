@@ -117,8 +117,12 @@ void bind(A &a, B &b) {
 }
 
 template<typename Res>
+using Expected = std::expected<Res, std::exception_ptr>;
+
+template<typename Res>
 struct ExpectedResult {
   using Result = Res;
+  using Expected = Expected<Res>;
 
   template<typename Res1>
   using Mapped = ExpectedResult<Res1>;
@@ -170,7 +174,7 @@ struct ExpectedResult {
     }
   }
 
-  std::expected<Res, std::exception_ptr> expected;
+  Expected expected;
 };
 
 } // namespace AIO

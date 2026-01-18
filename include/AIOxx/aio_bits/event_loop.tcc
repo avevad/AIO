@@ -24,7 +24,7 @@ Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::execute(Functor &
         std::move(promise).fulfill();
       }
     } catch (...) {
-      std::move(promise).set(ExpectedResult<Res>::make_err_from_current());
+      std::move(promise).fail_any(std::current_exception());
     }
   };
   auto coro = std::make_shared<CoroutineHolder>(std::move(job));
@@ -49,19 +49,24 @@ Res BasicEventLoop::await(Future<Res> future) {
 
   auto task = [this, coro = current_coro.value()] mutable { do_coroutine_step(std::move(coro)); };
 
-  ExpectedResult<Res> result;
-  std::move(future).consume_with([this, task = std::move(task), &result](ExpectedResult<Res> result1) mutable {
-    result = std::move(result1);
-    pending_tasks.push(std::move(task));
-  });
+  Expected<Res> expected = std::unexpected<std::exception_ptr>(nullptr);
+  std::move(future)
+    .map_expected([this, task = std::move(task), &expected](std::expected<Res, std::exception_ptr> expected1) mutable {
+      expected = std::move(expected1);
+      pending_tasks.push(std::move(task));
+      return std::expected<void, std::exception_ptr>{};
+    })
+    .detach();
 
   current_coro.value()->wrapped.yield();
 
-  if (!result.is_ok()) [[unlikely]] {
-    std::rethrow_exception(result.move_as_err());
+  if (!expected.has_value()) {
+    std::rethrow_exception(expected.error());
   }
 
-  return result.move_as_ok();
+  if constexpr (!std::is_void_v<Res>) {
+    return std::move(*expected);
+  }
 }
 
 template<typename Rep, typename Period>

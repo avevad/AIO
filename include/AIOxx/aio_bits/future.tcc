@@ -16,7 +16,7 @@ namespace _impl {
     Bond::operator=(std::move(other));
 
     maybe_result = std::move(other.maybe_result);
-    other.result.reset();
+    other.maybe_result.reset();
 
     awaited = other.awaited;
     other.awaited = true;
@@ -85,7 +85,7 @@ namespace _impl {
 
   template<FutureResult Res, typename Future, typename Promise>
   template<typename Functor, typename Res1>
-  auto FutureBase<Res, Future, Promise>::map(Functor &&functor) && {
+  auto FutureBase<Res, Future, Promise>::map_result(Functor &&functor) && {
     using MappedFuture = Future::template Mapped<Res1>;
     using MappedPromise = Promise::template Mapped<Res1>;
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
@@ -105,6 +105,25 @@ namespace _impl {
       } else {
         std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
       }
+    });
+
+    return future;
+  }
+
+  template<FutureResult Res, typename Future, typename Promise>
+  template<typename Functor, typename Res1>
+  auto FutureBase<Res, Future, Promise>::map_expected(Functor &&functor) && {
+    using MappedFuture = Future::template Mapped<Res1>;
+    using MappedPromise = Promise::template Mapped<Res1>;
+    using MappedExpected = ExpectedResult::template Mapped<Res1>;
+
+    MappedFuture future;
+    MappedPromise promise;
+    AIO::bind(promise, future);
+
+    std::move(*this).consume_with([promise = std::move(promise),
+                                   functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
+      std::move(promise).set(MappedExpected{.expected = functor(std::move(result.expected))});
     });
 
     return future;
@@ -180,6 +199,11 @@ namespace _impl {
   }
 
   template<FutureResult Res, typename Promise, typename Future>
+  void PromiseBase<Res, Promise, Future>::fail_any(std::exception_ptr err) {
+    std::move(*this).set(ExpectedResult::make_err(std::move(err)));
+  }
+
+  template<FutureResult Res, typename Promise, typename Future>
   void PromiseBase<Res, Promise, Future>::fulfill(Result res) && {
     std::move(*this).set(ExpectedResult::make_ok(std::move(res)));
   }
@@ -200,6 +224,10 @@ namespace _impl {
 } // namespace _impl
 
 template<FutureResult Res>
+Future<Res>::Future(Future<void> &&other) noexcept : FutureBase(std::move(other)) {
+}
+
+template<FutureResult Res>
 template<typename AsyncFunctor, typename Res1>
 Future<Res1> Future<Res>::then(AsyncFunctor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
@@ -215,18 +243,34 @@ Future<Res1> Future<Res>::then(AsyncFunctor &&functor) && {
 
 template<FutureResult Res>
 template<typename Functor, typename Res1>
-Future<Res>::Mapped<Res1> Future<Res>::map(Functor &&functor) && {
+Future<Res>::Mapped<Res1> Future<Res>::map_result(Functor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
     return _impl::true_void(
-      std::move(*this).FutureBase::map([functor = std::forward<Functor>(functor)](Res res) mutable {
+      std::move(*this).FutureBase::map_result([functor = std::forward<Functor>(functor)](Res res) mutable {
         functor(std::move(res));
         return _impl::Void{};
       })
     );
   } else {
-    return std::move(*this).FutureBase::map(std::forward<Functor>(functor));
+    return std::move(*this).FutureBase::map_result(std::forward<Functor>(functor));
   }
 }
+
+template<FutureResult Res>
+template<typename Functor, typename Res1>
+Future<Res>::Mapped<Res1> Future<Res>::map_expected(Functor &&functor) && {
+  using Expected = std::expected<Res, std::exception_ptr>;
+  if constexpr (std::is_void_v<Res1>) {
+    return _impl::true_void(
+      std::move(*this).FutureBase::map_expected([functor = std::forward<Functor>(functor)](Expected expected) mutable {
+        return functor(std::move(expected)).transform([] { return _impl::Void{}; });
+      })
+    );
+  } else {
+    return std::move(*this).FutureBase::map_expected(std::forward<Functor>(functor));
+  }
+}
+
 template<typename AsyncFunctor, typename Res1>
 Future<Res1> Future<void>::then(AsyncFunctor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
@@ -252,31 +296,38 @@ Future<void> Future<void>::except(AsyncHandler &&handler) && {
 }
 
 template<typename Functor, typename Res1>
-Future<void>::Mapped<Res1> Future<void>::map(Functor &&functor) && {
+Future<void>::Mapped<Res1> Future<void>::map_result(Functor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
     return _impl::true_void(
-      std::move(*this).FutureBase::map([functor = std::forward<Functor>(functor)](_impl::Void) mutable {
+      std::move(*this).FutureBase::map_result([functor = std::forward<Functor>(functor)](_impl::Void) mutable {
         functor();
         return _impl::Void{};
       })
     );
   } else {
-    return std::move(*this).FutureBase::map([functor = std::forward<Functor>(functor)](_impl::Void) mutable {
+    return std::move(*this).FutureBase::map_result([functor = std::forward<Functor>(functor)](_impl::Void) mutable {
       return functor();
     });
   }
 }
 
-template<typename Consumer>
-void Future<void>::consume_with(Consumer &&consumer) {
-  std::move(*this).FutureBase::consume_with([consumer =
-                                               std::forward<Consumer>(consumer)](ExpectedResult result) mutable {
-    consumer(_impl::true_void(std::move(result)));
-  });
+template<typename Functor, typename Res1>
+Future<void>::Mapped<Res1> Future<void>::map_expected(Functor &&functor) && {
+  using Expected = std::expected<_impl::Void, std::exception_ptr>;
+  if constexpr (std::is_void_v<Res1>) {
+    return _impl::true_void(
+      std::move(*this).FutureBase::map_expected([functor = std::forward<Functor>(functor)](Expected expected) mutable {
+        return functor(std::move(expected).transform([](auto) {})).transform([] { return _impl::Void{}; });
+      })
+    );
+  } else {
+    return std::move(*this).FutureBase::map_result([functor = std::forward<Functor>(functor)](Expected expected) {
+      return functor(std::move(expected).transform([](auto) {}));
+    });
+  }
 }
 
-inline void Promise<void>::set(ExpectedResult::Mapped<void> result) && {
-  std::move(*this).PromiseBase::set(_impl::fake_void(std::move(result)));
+inline Future<void>::Future(Future<_impl::Void> &&other) noexcept : FutureBase(std::move(other)) {
 }
 
 inline void Promise<void>::fulfill() && {
@@ -284,50 +335,37 @@ inline void Promise<void>::fulfill() && {
 }
 
 inline Future<void> _impl::true_void(Future<Void> future) {
-  Future<void> future1;
-  Promise<void> promise1;
-  AIO::bind(future1, promise1);
-  future.consume_with([promise1 = std::move(promise1)](ExpectedResult<Void> result) mutable {
-    std::move(promise1).set(true_void(std::move(result)));
-  });
-  return future1;
+  return Future<void>(std::move(future));
 }
 
 inline Future<_impl::Void> _impl::fake_void(Future<void> future) {
-  Future<Void> future1;
-  Promise<Void> promise1;
-  AIO::bind(future1, promise1);
-  future.consume_with([promise1 = std::move(promise1)](ExpectedResult<void> result) mutable {
-    std::move(promise1).set(fake_void(std::move(result)));
-  });
-  return future1;
+  return Future<Void>(std::move(future));
 }
 
-inline ExpectedResult<void> _impl::true_void(ExpectedResult<Void> result) {
-  return result.is_ok() ? ExpectedResult<void>::make_ok() : ExpectedResult<void>::make_err(result.move_as_err());
-}
-
-inline ExpectedResult<_impl::Void> _impl::fake_void(ExpectedResult<void> result) {
-  return result.is_ok() ? ExpectedResult<Void>::make_ok({}) : ExpectedResult<Void>::make_err(result.move_as_err());
-}
-
+// TODO: this is ugly and wrong, should be refactored after implementing Future.cancel()
 template<typename Res, typename Res1>
 Future<bool> operator|(Future<Res> &&future, Future<Res1> &&future1) {
   Future<bool> result;
   auto promise = std::make_shared<Promise<bool>>();
   bind(result, *promise);
 
-  std::move(future).consume_with([promise](auto...) mutable {
-    if (!promise->is_fulfilled()) {
-      std::move(*promise).fulfill(true);
-    }
-  });
+  std::move(future)
+    .map_expected([promise](auto...) mutable {
+      if (!promise->is_fulfilled()) {
+        std::move(*promise).fulfill(true);
+      }
+      return Expected<void>{};
+    })
+    .detach();
 
-  std::move(future1).consume_with([promise](auto...) mutable {
-    if (!promise->is_fulfilled()) {
-      std::move(*promise).fulfill(false);
-    }
-  });
+  std::move(future1)
+    .map_expected([promise](auto...) mutable {
+      if (!promise->is_fulfilled()) {
+        std::move(*promise).fulfill(false);
+      }
+      return Expected<void>{};
+    })
+    .detach();
 
   return result;
 }

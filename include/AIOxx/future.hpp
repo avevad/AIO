@@ -34,19 +34,17 @@ namespace _impl {
     using ExpectedResult = ExpectedResult<Res>;
     using Consumer = std::move_only_function<void(ExpectedResult)>;
 
-    // TODO: make this private
-    template<typename Consumer>
-    void consume_with(Consumer &&consumer);
-
     template<typename AsyncFunctor, typename Res1 = std::invoke_result_t<AsyncFunctor, Res>::Result>
     auto then(AsyncFunctor &&functor) &&;
 
     template<typename Exception, typename AsyncHandler>
     Future except(AsyncHandler &&handler) &&;
 
-    // TODO: refactor usages and remove this
     template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Res>>
-    auto map(Functor &&functor) &&;
+    auto map_result(Functor &&functor) &&;
+
+    template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<Res>>::value_type>
+    auto map_expected(Functor &&functor) &&;
 
     void detach() &&;
 
@@ -55,6 +53,9 @@ namespace _impl {
     friend class FutureBase;
     template<FutureResult Res1, typename Promise1, typename Future1>
     friend class PromiseBase;
+
+    template<typename Consumer>
+    void consume_with(Consumer &&consumer);
 
     bool awaited = false;
     std::optional<ExpectedResult> maybe_result = std::nullopt;
@@ -81,11 +82,10 @@ namespace _impl {
     using ExpectedResult = ExpectedResult<Res>;
     using Consumer = std::move_only_function<void(ExpectedResult)>;
 
-    // TODO: make this private
-    void set(ExpectedResult result) &&;
-
     template<typename Exception>
     void fail(const Exception &e) &&;
+
+    void fail_any(std::exception_ptr err);
 
     void fulfill(Result res) &&;
 
@@ -94,6 +94,8 @@ namespace _impl {
     friend class FutureBase;
     template<FutureResult Res1, typename Promise1, typename Future1>
     friend class PromiseBase;
+
+    void set(ExpectedResult result) &&;
 
     bool fulfilled = false;
     std::optional<Consumer> maybe_consumer = std::nullopt;
@@ -116,15 +118,18 @@ public:
 
   using FutureBase::FutureBase;
 
+  explicit Future(Future<void> &&other) noexcept;
+
   template<typename AsyncFunctor, typename Res1 = std::invoke_result_t<AsyncFunctor, Res>::Result>
   Future<Res1> then(AsyncFunctor &&functor) &&;
 
   using FutureBase::except;
 
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Res>>
-  Mapped<Res1> map(Functor &&functor) &&;
+  Mapped<Res1> map_result(Functor &&functor) &&;
 
-  using FutureBase::consume_with;
+  template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<Res>>::value_type>
+  Mapped<Res1> map_expected(Functor &&functor) &&;
 
   using FutureBase::detach;
 };
@@ -138,6 +143,8 @@ public:
 
   using FutureBase::FutureBase;
 
+  explicit Future(Future<_impl::Void> &&other) noexcept;
+
   template<typename AsyncFunctor, typename Res1 = std::invoke_result_t<AsyncFunctor>::Result>
   Future<Res1> then(AsyncFunctor &&functor) &&;
 
@@ -145,10 +152,10 @@ public:
   Future except(AsyncHandler &&handler) &&;
 
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor>>
-  Mapped<Res1> map(Functor &&functor) &&;
+  Mapped<Res1> map_result(Functor &&functor) &&;
 
-  template<typename Consumer>
-  void consume_with(Consumer &&consumer);
+  template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<void>>::value_type>
+  Mapped<Res1> map_expected(Functor &&functor) &&;
 
   using FutureBase::detach;
 };
@@ -164,9 +171,9 @@ public:
 
   using PromiseBase::PromiseBase;
 
-  using PromiseBase::set;
-
   using PromiseBase::fail;
+
+  using PromiseBase::fail_any;
 
   using PromiseBase::fulfill;
 };
@@ -180,23 +187,20 @@ public:
 
   using PromiseBase::PromiseBase;
 
-  void set(ExpectedResult::Mapped<void> result) &&;
-
   using PromiseBase::fail;
+
+  using PromiseBase::fail_any;
 
   void fulfill() &&;
 };
 
+// TODO: this is ugly and wrong, should be refactored after implementing Future.cancel()
 template<typename Res, typename Res1>
 Future<bool> operator|(Future<Res> &&future, Future<Res1> &&future1);
 
 namespace _impl {
   Future<void> true_void(Future<Void> future);
   Future<Void> fake_void(Future<void> future);
-
-  // TODO: get rid of this
-  ExpectedResult<void> true_void(ExpectedResult<Void> result);
-  ExpectedResult<Void> fake_void(ExpectedResult<void> result);
 } // namespace _impl
 
 } // namespace AIO
