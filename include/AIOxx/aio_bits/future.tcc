@@ -43,10 +43,14 @@ namespace _impl {
     std::move(*this).consume_with([promise = std::move(promise),
                                    fun = std::forward<AsyncFunctor>(functor)](ExpectedResult result) mutable {
       if (result.is_ok()) {
-        MappedFuture future1 = fun(result.move_as_ok());
-        std::move(future1).consume_with([promise = std::move(promise)](auto result1) mutable {
-          std::move(promise).set(std::move(result1));
-        });
+        try {
+          MappedFuture future1 = fun(result.move_as_ok());
+          std::move(future1).consume_with([promise = std::move(promise)](auto result1) mutable {
+            std::move(promise).set(std::move(result1));
+          });
+        } catch (...) {
+          std::move(promise).set(MappedExpected::make_err_from_current());
+        }
       } else {
         std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
       }
@@ -68,10 +72,14 @@ namespace _impl {
         try {
           std::rethrow_exception(result.move_as_err());
         } catch (Exception &e) {
-          Future future1 = handler(e);
-          std::move(future1).consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
-            std::move(promise).set(std::move(result1));
-          });
+          try {
+            Future future1 = handler(e);
+            std::move(future1).consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
+              std::move(promise).set(std::move(result1));
+            });
+          } catch (...) {
+            std::move(promise).set(ExpectedResult::make_err_from_current());
+          }
         } catch (...) {
           std::move(promise).set(ExpectedResult::make_err_from_current());
         }
@@ -80,6 +88,35 @@ namespace _impl {
       }
     });
 
+    return future;
+  }
+
+  template<FutureResult Res, typename Future, typename Promise>
+  template<typename AsyncHandler>
+  Future FutureBase<Res, Future, Promise>::except_any(AsyncHandler &&handler) && {
+    Future future;
+    Promise promise;
+    AIO::bind(promise, future);
+
+    std::move(*this).consume_with([promise = std::move(promise),
+                                   handler = std::forward<AsyncHandler>(handler)](ExpectedResult result) mutable {
+      if (!result.is_ok()) {
+        try {
+          std::rethrow_exception(result.move_as_err());
+        } catch (...) {
+          try {
+            Future future1 = handler(std::current_exception());
+            std::move(future1).consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
+              std::move(promise).set(std::move(result1));
+            });
+          } catch (...) {
+            std::move(promise).set(ExpectedResult::make_err_from_current());
+          }
+        }
+      } else {
+        std::move(promise).set(std::move(result));
+      }
+    });
     return future;
   }
 
@@ -123,7 +160,11 @@ namespace _impl {
 
     std::move(*this).consume_with([promise = std::move(promise),
                                    functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
-      std::move(promise).set(MappedExpected{.expected = functor(std::move(result.expected))});
+      try {
+        std::move(promise).set(MappedExpected{.expected = functor(std::move(result.expected))});
+      } catch (...) {
+        std::move(promise).set(MappedExpected::make_err_from_current());
+      }
     });
 
     return future;
@@ -287,6 +328,16 @@ Future<void> Future<void>::except(AsyncHandler &&handler) && {
     std::move(*this).FutureBase::except<Exception>(
       [handler = std::forward<AsyncHandler>(handler)](Exception &e) mutable { return _impl::fake_void(handler(e)); }
     )
+  );
+}
+
+template<typename AsyncHandler>
+Future<void> Future<void>::except_any(AsyncHandler &&handler) && {
+  return _impl::true_void(
+    std::move(*this).FutureBase::except_any([handler =
+                                               std::forward<AsyncHandler>(handler)](std::exception_ptr err) mutable {
+      return _impl::fake_void(handler(err));
+    })
   );
 }
 

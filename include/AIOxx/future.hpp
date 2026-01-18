@@ -40,6 +40,9 @@ namespace _impl {
     template<typename Exception, typename AsyncHandler>
     Future except(AsyncHandler &&handler) &&;
 
+    template<typename AsyncHandler>
+    Future except_any(AsyncHandler &&handler) &&;
+
     template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Res>>
     auto map_result(Functor &&functor) &&;
 
@@ -123,6 +126,8 @@ public:
 
   using FutureBase::except;
 
+  using FutureBase::except_any;
+
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Res>>
   Mapped<Res1> map_result(Functor &&functor) &&;
 
@@ -148,6 +153,9 @@ public:
 
   template<typename Exception, typename AsyncHandler>
   Future except(AsyncHandler &&handler) &&;
+
+  template<typename AsyncHandler>
+  Future except_any(AsyncHandler &&handler) &&;
 
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor>>
   Mapped<Res1> map_result(Functor &&functor) &&;
