@@ -95,7 +95,7 @@ namespace _impl {
     template<typename Exception>
     void fail(const Exception &e) &&;
 
-    void fail_any(std::exception_ptr err);
+    void fail_any(std::exception_ptr err) &&;
 
     void fulfill(Result res) &&;
 

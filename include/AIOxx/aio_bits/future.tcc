@@ -235,7 +235,7 @@ namespace _impl {
   }
 
   template<FutureResult Res, typename Promise, typename Future>
-  void PromiseBase<Res, Promise, Future>::fail_any(std::exception_ptr err) {
+  void PromiseBase<Res, Promise, Future>::fail_any(std::exception_ptr err) && {
     std::move(*this).set(ExpectedResult::make_err(std::move(err)));
   }
 
@@ -365,7 +365,7 @@ Future<void>::Mapped<Res1> Future<void>::map_expected(Functor &&functor) && {
       })
     );
   } else {
-    return std::move(*this).FutureBase::map_result([functor = std::forward<Functor>(functor)](Expected expected) {
+    return std::move(*this).FutureBase::map_expected([functor = std::forward<Functor>(functor)](Expected expected) {
       return functor(std::move(expected).transform([](auto) {}));
     });
   }
