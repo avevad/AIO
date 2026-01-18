@@ -30,6 +30,8 @@ namespace _impl {
     template<typename P>
     void bind_to(P &promise);
 
+    [[nodiscard]] bool is_free() const;
+
     ~FutureBase();
 
   protected:
@@ -61,9 +63,8 @@ namespace _impl {
     friend class PromiseBase;
 
     template<typename Consumer>
-    void consume_with(Consumer &&consumer);
+    void consume_with(Consumer &&consumer) &&;
 
-    bool awaited = false;
     std::optional<ExpectedResult> maybe_result = std::nullopt;
   };
 
@@ -81,6 +82,8 @@ namespace _impl {
 
     template<typename F>
     void bind_to(F &future);
+
+    [[nodiscard]] bool is_free() const;
 
     ~PromiseBase();
 
@@ -104,7 +107,6 @@ namespace _impl {
 
     void set(ExpectedResult result) &&;
 
-    bool fulfilled = false;
     std::optional<Consumer> maybe_consumer = std::nullopt;
   };
 

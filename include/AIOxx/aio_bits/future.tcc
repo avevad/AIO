@@ -6,20 +6,17 @@ namespace AIO {
 namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise>::FutureBase(FutureBase &&other) noexcept
-      : Bond(std::move(other)), awaited(other.awaited), maybe_result(std::move(other.maybe_result)) {
+      : Bond(std::move(other)), maybe_result(std::move(other.maybe_result)) {
     other.maybe_result.reset();
-    other.awaited = true;
   }
 
   template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise> &FutureBase<Res, Future, Promise>::operator=(FutureBase &&other) noexcept {
-    Bond::operator=(std::move(other));
+    AIOXX_ASSUME(is_free());
 
+    Bond::operator=(std::move(other));
     maybe_result = std::move(other.maybe_result);
     other.maybe_result.reset();
-
-    awaited = other.awaited;
-    other.awaited = true;
 
     return *this;
   }
@@ -29,10 +26,20 @@ namespace _impl {
   void FutureBase<Res, Future, Promise>::bind_to(P &promise) {
     Bond::initialize(promise);
   }
+  template<FutureResult Res, typename Future, typename Promise>
+  bool FutureBase<Res, Future, Promise>::is_free() const {
+    if (!Bond::is_initialized())
+      return true;
+
+    if (!Bond::is_alive())
+      return !maybe_result.has_value();
+
+    return Bond::get().maybe_consumer.has_value();
+  }
 
   template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise>::~FutureBase() {
-    AIOXX_ASSUME(awaited);
+    AIOXX_ASSUME(is_free());
   }
 
   template<FutureResult Res, typename Future, typename Promise>
@@ -167,36 +174,32 @@ namespace _impl {
 
   template<FutureResult Res, typename Future, typename Promise>
   template<typename Consumer>
-  void FutureBase<Res, Future, Promise>::consume_with(Consumer &&consumer) {
+  void FutureBase<Res, Future, Promise>::consume_with(Consumer &&consumer) && {
     AIOXX_ASSUME(Bond::is_initialized());
-    AIOXX_ASSUME(!awaited);
 
-    awaited = true;
     if (maybe_result.has_value()) {
       consumer(std::move(*maybe_result));
-    }
-
-    if (Bond::is_alive()) {
+      maybe_result.reset();
+    } else if (Bond::is_alive()) {
       Bond::get().maybe_consumer = std::forward<Consumer>(consumer);
     }
+
+    auto _ = std::move(*this);
   }
 
   template<FutureResult Res, typename Promise, typename Future>
   PromiseBase<Res, Promise, Future>::PromiseBase(PromiseBase &&other) noexcept
-      : Bond(std::move(other)), fulfilled(other.fulfilled), maybe_consumer(std::move(other.maybe_consumer)) {
+      : Bond(std::move(other)), maybe_consumer(std::move(other.maybe_consumer)) {
     other.maybe_consumer.reset();
-    other.fulfilled = true;
   }
 
   template<FutureResult Res, typename Promise, typename Future>
   PromiseBase<Res, Promise, Future> &PromiseBase<Res, Promise, Future>::operator=(PromiseBase &&other) noexcept {
-    Bond::operator=(std::move(other));
+    AIOXX_ASSUME(is_free());
 
+    Bond::operator=(std::move(other));
     maybe_consumer = std::move(other.maybe_consumer);
     other.maybe_consumer.reset();
-
-    fulfilled = other.fulfilled;
-    other.fulfilled = true;
 
     return *this;
   }
@@ -208,9 +211,20 @@ namespace _impl {
   }
 
   template<FutureResult Res, typename Promise, typename Future>
+  bool PromiseBase<Res, Promise, Future>::is_free() const {
+    if (!Bond::is_initialized())
+      return true;
+
+    if (!Bond::is_alive())
+      return !maybe_consumer.has_value();
+
+    return Bond::get().maybe_result.has_value();
+  }
+
+  template<FutureResult Res, typename Promise, typename Future>
   PromiseBase<Res, Promise, Future>::~PromiseBase() {
-    if (!fulfilled) {
-      warning("destroying non-fulfilled promise");
+    if (!is_free()) {
+      warning("destroying unfulfilled promise");
     }
   }
 
@@ -233,15 +247,15 @@ namespace _impl {
   template<FutureResult Res, typename Promise, typename Future>
   void PromiseBase<Res, Promise, Future>::set(ExpectedResult result) && {
     AIOXX_ASSUME(Bond::is_initialized());
-    AIOXX_ASSUME(!fulfilled);
-
-    fulfilled = true;
 
     if (maybe_consumer.has_value()) {
       (*maybe_consumer)(std::move(result));
+      maybe_consumer.reset();
     } else {
       Bond::get().maybe_result.emplace(std::move(result));
     }
+
+    auto _ = std::move(*this);
   }
 } // namespace _impl
 
