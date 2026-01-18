@@ -267,11 +267,10 @@ template<FutureResult Res>
 template<typename AsyncFunctor, typename Res1>
 Future<Res1> Future<Res>::then(AsyncFunctor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
-    return _impl::true_void(
-      std::move(*this).FutureBase::then([functor = std::forward<AsyncFunctor>(functor)](Res res) mutable {
-        return _impl::fake_void(functor(std::move(res)));
-      })
-    );
+    return Future<void>(std::move(*this).FutureBase::then([functor =
+                                                             std::forward<AsyncFunctor>(functor)](Res res) mutable {
+      return Future<_impl::Void>(functor(std::move(res)));
+    }));
   } else {
     return std::move(*this).FutureBase::then(std::forward<AsyncFunctor>(functor));
   }
@@ -281,12 +280,11 @@ template<FutureResult Res>
 template<typename Functor, typename Res1>
 Future<Res>::Mapped<Res1> Future<Res>::map_result(Functor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
-    return _impl::true_void(
-      std::move(*this).FutureBase::map_result([functor = std::forward<Functor>(functor)](Res res) mutable {
-        functor(std::move(res));
-        return _impl::Void{};
-      })
-    );
+    return Future<void>(std::move(*this).FutureBase::map_result([functor =
+                                                                   std::forward<Functor>(functor)](Res res) mutable {
+      functor(std::move(res));
+      return _impl::Void{};
+    }));
   } else {
     return std::move(*this).FutureBase::map_result(std::forward<Functor>(functor));
   }
@@ -297,7 +295,7 @@ template<typename Functor, typename Res1>
 Future<Res>::Mapped<Res1> Future<Res>::map_expected(Functor &&functor) && {
   using Expected = std::expected<Res, std::exception_ptr>;
   if constexpr (std::is_void_v<Res1>) {
-    return _impl::true_void(
+    return Future<void>(
       std::move(*this).FutureBase::map_expected([functor = std::forward<Functor>(functor)](Expected expected) mutable {
         return functor(std::move(expected)).transform([] { return _impl::Void{}; });
       })
@@ -310,9 +308,9 @@ Future<Res>::Mapped<Res1> Future<Res>::map_expected(Functor &&functor) && {
 template<typename AsyncFunctor, typename Res1>
 Future<Res1> Future<void>::then(AsyncFunctor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
-    return _impl::true_void(
+    return Future(
       std::move(*this).FutureBase::then([functor = std::forward<AsyncFunctor>(functor)](_impl::Void) mutable {
-        return _impl::fake_void(functor());
+        return Future<_impl::Void>(functor());
       })
     );
   } else {
@@ -324,19 +322,19 @@ Future<Res1> Future<void>::then(AsyncFunctor &&functor) && {
 
 template<typename Exception, typename AsyncHandler>
 Future<void> Future<void>::except(AsyncHandler &&handler) && {
-  return _impl::true_void(
+  return Future(
     std::move(*this).FutureBase::except<Exception>(
-      [handler = std::forward<AsyncHandler>(handler)](Exception &e) mutable { return _impl::fake_void(handler(e)); }
+      [handler = std::forward<AsyncHandler>(handler)](Exception &e) mutable { return Future<_impl::Void>(handler(e)); }
     )
   );
 }
 
 template<typename AsyncHandler>
 Future<void> Future<void>::except_any(AsyncHandler &&handler) && {
-  return _impl::true_void(
+  return Future(
     std::move(*this).FutureBase::except_any([handler =
                                                std::forward<AsyncHandler>(handler)](std::exception_ptr err) mutable {
-      return _impl::fake_void(handler(err));
+      return Future<_impl::Void>(handler(err));
     })
   );
 }
@@ -344,7 +342,7 @@ Future<void> Future<void>::except_any(AsyncHandler &&handler) && {
 template<typename Functor, typename Res1>
 Future<void>::Mapped<Res1> Future<void>::map_result(Functor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
-    return _impl::true_void(
+    return Future(
       std::move(*this).FutureBase::map_result([functor = std::forward<Functor>(functor)](_impl::Void) mutable {
         functor();
         return _impl::Void{};
@@ -361,7 +359,7 @@ template<typename Functor, typename Res1>
 Future<void>::Mapped<Res1> Future<void>::map_expected(Functor &&functor) && {
   using Expected = std::expected<_impl::Void, std::exception_ptr>;
   if constexpr (std::is_void_v<Res1>) {
-    return _impl::true_void(
+    return Future(
       std::move(*this).FutureBase::map_expected([functor = std::forward<Functor>(functor)](Expected expected) mutable {
         return functor(std::move(expected).transform([](auto) {})).transform([] { return _impl::Void{}; });
       })
@@ -378,14 +376,6 @@ inline Future<void>::Future(Future<_impl::Void> &&other) noexcept : FutureBase(s
 
 inline void Promise<void>::fulfill() && {
   std::move(*this).PromiseBase::fulfill(_impl::Void{});
-}
-
-inline Future<void> _impl::true_void(Future<Void> future) {
-  return Future<void>(std::move(future));
-}
-
-inline Future<_impl::Void> _impl::fake_void(Future<void> future) {
-  return Future<Void>(std::move(future));
 }
 
 // TODO: this is ugly and wrong, should be refactored after implementing Future.cancel()

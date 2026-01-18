@@ -202,13 +202,7 @@ public:
 
 // TODO: this is ugly and wrong, should be refactored after implementing Future.cancel()
 template<typename Res, typename Res1>
-Future<bool> operator|(Future<Res> &&future, Future<Res1> &&future1);
-
-namespace _impl {
-  Future<void> true_void(Future<Void> future);
-  Future<Void> fake_void(Future<void> future);
-} // namespace _impl
-
+Future<bool> operator|(Future<Res> &&future1, Future<Res1> &&future2);
 } // namespace AIO
 
 #include "aio_bits/future.tcc"
