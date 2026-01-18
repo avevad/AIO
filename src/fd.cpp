@@ -43,14 +43,12 @@ FD &FD::operator=(FD &&other) noexcept {
 Future<void> FD::event(Direction direction) const {
   auto &promise_slot = direction == IN ? state->in_promise : state->out_promise;
   AIOXX_ASSUME(!promise_slot.has_value());
-  Future<void> future;
-  Promise<void> promise;
-  bind(future, promise);
+  auto [promise, future] = Contract<void>();
   promise_slot = std::move(promise);
   state->io_handle.value().update(
     (state->in_promise.has_value() ? IOTasksQueue::IN : 0) | (state->out_promise.has_value() ? IOTasksQueue::OUT : 0)
   );
-  return future;
+  return std::move(future);
 }
 
 FD::FD(BasicEventLoop &loop, SystemFD sys_fd) : fd(sys_fd), state(nullptr) {

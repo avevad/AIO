@@ -77,29 +77,33 @@ public:
   }
 
 protected:
-  bool is_initialized() {
+  void initialize(Derived1 &bound) {
+    AIOXX_ASSUME(!is_initialized());
+    AIOXX_ASSUME(!bound.is_initialized());
+    maybe_ptr = &bound;
+    bound.maybe_ptr = static_cast<Derived *>(this);
+  }
+
+  bool is_initialized() const {
     return maybe_ptr.has_value();
   }
 
-  bool is_alive() {
+  bool is_alive() const {
     AIOXX_ASSUME(is_initialized());
     return maybe_ptr != nullptr;
   }
 
-  Derived1 *get_ptr() {
+  Derived1 *get_ptr() const {
     AIOXX_ASSUME(is_initialized());
     return *maybe_ptr;
   }
 
-  Derived1 &get() {
+  Derived1 &get() const {
     AIOXX_ASSUME(is_alive());
     return **maybe_ptr;
   }
 
 private:
-  template<typename A, typename B>
-  friend void bind(A &a, B &b);
-
   friend class Bond<Derived1, Derived>;
 
   Bond<Derived1, Derived> *get_base_ptr() {
@@ -108,13 +112,6 @@ private:
 
   std::optional<Derived1 *> maybe_ptr = std::nullopt;
 };
-
-template<typename A, typename B>
-void bind(A &a, B &b) {
-  AIOXX_ASSUME(!a.is_initialized() && !b.is_initialized());
-  a.maybe_ptr = &b;
-  b.maybe_ptr = &a;
-}
 
 template<typename Res>
 using Expected = std::expected<Res, std::exception_ptr>;

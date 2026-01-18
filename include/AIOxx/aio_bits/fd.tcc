@@ -52,7 +52,7 @@ Future<std::optional<char>> BufferedStreamFD<BaseFD>::read_byte() const {
     });
   } else {
     Promise<bool> promise;
-    AIO::bind(byte_ready, promise);
+    byte_ready.bind_to(promise);
     std::move(promise).fulfill(true);
   }
   return std::move(byte_ready).map_result([this](bool has_byte) -> std::optional<char> {

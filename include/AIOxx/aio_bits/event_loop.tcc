@@ -9,11 +9,7 @@ namespace AIO {
 template<typename Functor, typename... Args>
 Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::execute(Functor &&fun, Args &&...args) {
   using Res = std::invoke_result_t<Functor, Args...>;
-
-  Future<Res> future;
-  Promise<Res> promise;
-  AIO::bind(future, promise);
-
+  auto [promise, future] = Contract<Res>();
   auto job = [fun = std::forward<Functor>(fun), args = std::tuple<Args...>(std::forward<Args>(args)...),
               promise = std::move(promise)] mutable {
     try {
@@ -27,12 +23,13 @@ Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::execute(Functor &
       std::move(promise).fail_any(std::current_exception());
     }
   };
+
   auto coro = std::make_shared<CoroutineHolder>(std::move(job));
 
   auto task = [this, coro = std::move(coro)] mutable { do_coroutine_step(std::move(coro)); };
   pending_tasks.push(std::move(task));
 
-  return future;
+  return std::move(future);
 }
 
 template<typename Functor>
@@ -140,21 +137,15 @@ inline const StreamFD &BasicEventLoop::get_stderr() {
 }
 
 inline Future<void> BasicEventLoop::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
-  Future<void> future;
-  Promise<void> promise;
-  AIO::bind(future, promise);
-
+  auto [promise, future] = Contract<void>();
   auto task = [promise = std::move(promise)] mutable { std::move(promise).fulfill(); };
   pending_timed_tasks.emplace(time, std::move(task));
-
-  return future;
+  return std::move(future);
 }
 
 inline Future<void> BasicEventLoop::forever() {
   return execute([this] {
-    Future<void> future;
-    Promise<void> promise;
-    bind(future, promise);
+    auto [promise, future] = Contract<void>();
     await(std::move(future));
   });
 }

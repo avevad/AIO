@@ -27,6 +27,9 @@ namespace _impl {
     FutureBase(const FutureBase &) = delete;
     FutureBase &operator=(const FutureBase &) = delete;
 
+    template<typename P>
+    void bind_to(P &promise);
+
     ~FutureBase();
 
   protected:
@@ -76,6 +79,9 @@ namespace _impl {
     PromiseBase(const PromiseBase &) = delete;
     PromiseBase &operator=(const PromiseBase &) = delete;
 
+    template<typename F>
+    void bind_to(F &future);
+
     ~PromiseBase();
 
   protected:
@@ -109,7 +115,7 @@ template<FutureResult Res>
 class Promise;
 
 template<FutureResult Res>
-class Future final : public _impl::FutureBase<Res, Future<Res>, Promise<Res>> {
+class [[nodiscard]] Future final : public _impl::FutureBase<Res, Future<Res>, Promise<Res>> {
   using FutureBase = _impl::FutureBase<Res, Future, Promise<Res>>;
 
 public:
@@ -138,7 +144,7 @@ public:
 };
 
 template<>
-class Future<void> final : public _impl::FutureBase<_impl::Void, Future<_impl::Void>, Promise<_impl::Void>> {
+class [[nodiscard]] Future<void> final : public _impl::FutureBase<_impl::Void, Future<_impl::Void>, Promise<_impl::Void>> {
 public:
   template<typename Res1>
   using Mapped = Future<Res1>;
@@ -167,7 +173,7 @@ public:
 };
 
 template<FutureResult Res>
-class Promise final : public _impl::PromiseBase<Res, Promise<Res>, Future<Res>> {
+class [[nodiscard]] Promise final : public _impl::PromiseBase<Res, Promise<Res>, Future<Res>> {
   using PromiseBase = _impl::PromiseBase<Res, Promise, Future<Res>>;
 
 public:
@@ -185,7 +191,7 @@ public:
 };
 
 template<>
-class Promise<void> final : public _impl::PromiseBase<_impl::Void, Promise<_impl::Void>, Future<_impl::Void>> {
+class [[nodiscard]] Promise<void> final : public _impl::PromiseBase<_impl::Void, Promise<_impl::Void>, Future<_impl::Void>> {
 public:
   template<typename Res1>
   using Mapped = Promise<Res1>;
@@ -198,6 +204,15 @@ public:
   using PromiseBase::fail_any;
 
   void fulfill() &&;
+};
+
+template<typename Res>
+class Contract {
+public:
+  Contract();
+
+  Promise<Res> promise = {};
+  Future<Res> future = {};
 };
 
 // TODO: this is ugly and wrong, should be refactored after implementing Future.cancel()
