@@ -16,10 +16,15 @@ Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::fiber(Functor &&f
     try {
       if constexpr (!std::is_void_v<Res>) {
         std::move(promise).fulfill(
-          std::apply([&](auto &...xs) { return std::invoke(fun, std::forward_like<Args>(xs)...); }, args)
+          std::apply(
+            [&]<typename... A>(A &&...a) mutable { return std::invoke(std::move(fun), std::forward<A>(a)...); },
+            std::move(args)
+          )
         );
       } else {
-        std::apply([&](auto &...xs) { std::invoke(fun, std::forward_like<Args>(xs)...); }, args);
+        std::apply(
+          [&]<typename... A>(A &&...a) mutable { std::invoke(std::move(fun), std::forward<A>(a)...); }, std::move(args)
+        );
         std::move(promise).fulfill();
       }
     } catch (...) {
