@@ -23,7 +23,7 @@ public:
   FD(FD &&other) noexcept;
   FD &operator=(FD &&other) noexcept;
 
-  [[nodiscard]] Future<void> event(Direction direction) const;
+  [[nodiscard]] Future<void> ready(Direction direction) const;
 
   [[nodiscard]] BasicEventLoop &get_event_loop() const;
 
@@ -57,37 +57,11 @@ public:
   StreamFD(StreamFD &&other) noexcept = default;
   StreamFD &operator=(StreamFD &&other) noexcept = default;
 
-  Future<std::size_t> read(size_t size, char *data) const;
-  Future<std::size_t> write(size_t size, const char *data) const;
+  std::size_t read(size_t size, char *data) const;
+  std::size_t write(size_t size, const char *data) const;
 
 protected:
   StreamFD(BasicEventLoop &loop, SystemFD sys_fd);
-};
-
-template<std::derived_from<StreamFD> BaseFD>
-class BufferedStreamFD : public BaseFD {
-public:
-  constexpr static size_t ICAP_DEFAULT = 1024, OCAP_DEFAULT = 1024;
-
-  explicit BufferedStreamFD(BaseFD base);
-
-  Future<std::size_t> read(size_t size, char *data) const;
-  Future<std::optional<char>> read_byte() const;
-  Future<std::string> read_until(char delim, size_t limit = std::numeric_limits<size_t>::max());
-
-  Future<std::size_t> write(size_t size, const char *data) const;
-  Future<void> write_string(std::string_view str) const;
-
-  [[nodiscard]] Future<bool> flush() const;
-
-private:
-  Future<std::size_t> read_some(size_t size, char *data) const;
-  Future<std::size_t> write_some(size_t size, const char *data) const;
-
-  std::unique_ptr<char[]> i_buf = std::make_unique<char[]>(ICAP_DEFAULT);
-  std::unique_ptr<char[]> o_buf = std::make_unique<char[]>(OCAP_DEFAULT);
-  mutable size_t i_beg = 0, i_sz = 0, o_sz = 0;
-  size_t i_cap = ICAP_DEFAULT, o_cap = OCAP_DEFAULT;
 };
 
 } // namespace AIO

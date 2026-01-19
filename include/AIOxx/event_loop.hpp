@@ -26,14 +26,12 @@ public:
   BasicEventLoop &operator=(BasicEventLoop &&other) = delete;
 
   template<typename Functor, typename... Args>
-  Future<std::invoke_result_t<Functor, Args...>> execute(Functor &&fun, Args &&...args);
+  Future<std::invoke_result_t<Functor, Args...>> fiber(Functor &&fun, Args &&...args);
 
   template<typename Rep, typename Period>
   Future<void> timeout(const std::chrono::duration<Rep, Period> &duration);
 
   Future<void> deadline(const std::chrono::time_point<std::chrono::steady_clock> &time);
-
-  Future<void> forever();
 
   template<typename Functor>
   auto async(Functor &&fun);
@@ -41,11 +39,9 @@ public:
   template<typename Res>
   Res await(Future<Res> future);
 
-  IOTasksQueue::Handle register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback);
-
-  void run();
   void yield();
-  [[noreturn]] void stop();
+
+  IOTasksQueue::Handle register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback);
 
   const StreamFD &get_stdin();
   const StreamFD &get_stdout();
@@ -70,8 +66,12 @@ private:
     bool operator<(const TimedTask &task1) const;
   };
 
-  template<FutureResult Res>
-  friend class Future;
+  // TODO: better startup mechanism
+  template<typename MainFunctor>
+  friend void run_in_new(MainFunctor &&main);
+
+  void run();
+  [[noreturn]] void stop();
 
   void do_coroutine_step(std::shared_ptr<CoroutineHolder> coro);
 
@@ -84,8 +84,6 @@ private:
 
   std::optional<StreamFD> std_in = std::nullopt, std_out = std::nullopt, std_err = std::nullopt;
 };
-
-void run(const std::function<void(BasicEventLoop &)> &main_function);
 
 } // namespace AIO
 

@@ -40,7 +40,7 @@ FD &FD::operator=(FD &&other) noexcept {
   return *this;
 }
 
-Future<void> FD::event(Direction direction) const {
+Future<void> FD::ready(Direction direction) const {
   auto &promise_slot = direction == IN ? state->in_promise : state->out_promise;
   AIOXX_ASSUME(!promise_slot.has_value());
   auto [promise, future] = Contract<void>();
@@ -89,24 +89,22 @@ StreamFD StreamFD::steal_from_system(BasicEventLoop &loop, SystemFD sys_fd) {
   return {loop, sys_fd};
 }
 
-Future<std::size_t> StreamFD::read(size_t size, char *data) const {
-  return event(IN).map_result([fd = get_sys_fd(), data, size] -> size_t {
-    auto read_size = ::read(fd, data, size);
-    if (read_size < 0) {
-      throw SystemError(std::string("read: ") + strerror(errno));
-    }
-    return read_size;
-  });
+std::size_t StreamFD::read(size_t size, char *data) const {
+  get_event_loop().await(ready(IN));
+  auto read_size = ::read(get_sys_fd(), data, size);
+  if (read_size < 0) {
+    throw SystemError(std::string("read: ") + strerror(errno));
+  }
+  return read_size;
 }
 
-Future<std::size_t> StreamFD::write(size_t size, const char *data) const {
-  return event(OUT).map_result([fd = get_sys_fd(), data, size] -> size_t {
-    auto write_size = ::write(fd, data, size);
-    if (write_size < 0) {
-      throw SystemError(std::string("write: ") + strerror(errno));
-    }
-    return write_size;
-  });
+std::size_t StreamFD::write(size_t size, const char *data) const {
+  get_event_loop().await(ready(OUT));
+  auto write_size = ::write(get_sys_fd(), data, size);
+  if (write_size < 0) {
+    throw SystemError(std::string("write: ") + strerror(errno));
+  }
+  return write_size;
 }
 
 StreamFD::StreamFD(BasicEventLoop &loop, SystemFD sys_fd) : FD(loop, sys_fd) {

@@ -61,7 +61,7 @@ StreamServerFD::StreamServerFD(BasicEventLoop &loop, const std::string &host, co
 }
 
 Future<StreamSocketFD> StreamServerFD::accept() {
-  return event(IN).map_result([this] -> StreamSocketFD {
+  return ready(IN).map_result([this] -> StreamSocketFD {
     sockaddr addr{};
     socklen_t len{};
     int fd = ::accept(get_sys_fd(), &addr, &len);
@@ -91,7 +91,7 @@ StreamSocketFD::connect(BasicEventLoop &loop, const std::string &host, const std
   freeaddrinfo(addr_info);
 
   StreamSocketFD socket_fd(loop, fd);
-  auto connected = socket_fd.event(OUT);
+  auto connected = socket_fd.ready(OUT);
   return std::move(connected).map_result([socket_fd = std::move(socket_fd)] mutable -> StreamSocketFD {
     int err = 0;
     socklen_t err_len = sizeof err;

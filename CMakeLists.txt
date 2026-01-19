@@ -44,7 +44,6 @@ add_library(aio-static STATIC
         src/io.cpp
         src/fd.cpp
         src/net_fd.cpp
-        src/main.cpp
 )
 target_include_directories(aio-static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(aio-static PROPERTIES OUTPUT_NAME aioxx)
@@ -57,7 +56,6 @@ add_library(aio-shared SHARED
         src/io.cpp
         src/fd.cpp
         src/net_fd.cpp
-        src/main.cpp
 )
 target_include_directories(aio-shared PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(aio-shared PROPERTIES OUTPUT_NAME aioxx)
@@ -65,10 +63,6 @@ set_target_properties(aio-shared PROPERTIES OUTPUT_NAME aioxx)
 # Sample executable
 add_executable(sample src/sample.cpp)
 target_link_libraries(sample PRIVATE aio-static)
-
-# Sample chat server
-add_executable(sample_server src/sample_server.cpp)
-target_link_libraries(sample_server PRIVATE aio-static)
 
 if (AIOXX_BUILD_TESTS)
     enable_testing()
