@@ -1,42 +1,44 @@
 #pragma once
 
-#include "AIOxx/event_loop.hpp"
-
 #include <thread>
+#include <utility>
+#include "AIOxx/event_loop.hpp"
 
 namespace AIO {
 
 template<typename Functor, typename... Args>
-Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::execute(Functor &&fun, Args &&...args) {
+Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::fiber(Functor &&fun, Args &&...args) {
   using Res = std::invoke_result_t<Functor, Args...>;
   auto [promise, future] = Contract<Res>();
-  auto job = [fun = std::forward<Functor>(fun), args = std::tuple<Args...>(std::forward<Args>(args)...),
-              promise = std::move(promise)] mutable {
+  auto coro = std::make_shared<CoroutineHolder>([fun = std::forward<Functor>(fun),
+                                                 args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
+                                                 promise = std::move(promise)] mutable {
     try {
       if constexpr (!std::is_void_v<Res>) {
-        std::move(promise).fulfill(std::apply(fun, std::move(args)));
+        std::move(promise).fulfill(
+          std::apply(
+            [&]<typename... A>(A &&...a) mutable { return std::invoke(std::move(fun), std::forward<A>(a)...); },
+            std::move(args)
+          )
+        );
       } else {
-        std::apply(fun, std::move(args));
+        std::apply(
+          [&]<typename... A>(A &&...a) mutable { std::invoke(std::move(fun), std::forward<A>(a)...); }, std::move(args)
+        );
         std::move(promise).fulfill();
       }
     } catch (...) {
       std::move(promise).fail_any(std::current_exception());
     }
-  };
-
-  auto coro = std::make_shared<CoroutineHolder>(std::move(job));
-
-  auto task = [this, coro = std::move(coro)] mutable { do_coroutine_step(std::move(coro)); };
-  pending_tasks.push(std::move(task));
-
+  });
+  pending_tasks.push([this, coro = std::move(coro)] mutable { do_coroutine_step(std::move(coro)); });
   return std::move(future);
 }
 
 template<typename Functor>
 auto BasicEventLoop::async(Functor &&fun) {
-  return [this, fun = std::forward<Functor>(fun)]<typename... Args>(Args &&...args) /* [[nodiscard]] */ {
-    // TODO: use true-nodiscard functor (object of a class) ------------------------------^
-    return this->execute(fun, std::forward<Args>(args)...);
+  return [this, fun = std::forward<Functor>(fun)]<typename... Args>(Args &&...args) {
+    return this->fiber(fun, std::forward<Args>(args)...);
   };
 }
 
@@ -79,6 +81,25 @@ template<typename Functor>
 BasicEventLoop::CoroutineHolder::CoroutineHolder(Functor fun) : wrapped(std::move(fun)) {
 }
 
+template<typename MainFunctor>
+void run_in_new(MainFunctor &&main) {
+  BasicEventLoop loop;
+
+  auto main_executed = loop.async([loop = &loop, main = std::forward<MainFunctor>(main)] { main(loop); });
+  auto exception_caught = loop.async([](const std::exception &e) { panic("unhandled exception in main function", e); });
+  auto anything_caught =
+    loop.async([](const std::exception_ptr &) { panic("unhandled unknown exception in main function"); });
+  auto loop_stopped = loop.async([loop = &loop] { loop->stop(); });
+
+  main_executed()
+    .template except<std::exception>(exception_caught)
+    .except_any(anything_caught)
+    .then(loop_stopped)
+    .detach();
+
+  loop.run();
+}
+
 inline bool BasicEventLoop::TimedTask::operator<(const TimedTask &task1) const {
   return when < task1.when;
 }
@@ -88,15 +109,6 @@ inline void BasicEventLoop::do_coroutine_step(std::shared_ptr<CoroutineHolder> c
   current_coro = std::move(coro);
   current_coro.value()->wrapped.resume();
   current_coro = std::nullopt;
-}
-
-inline void run(const std::function<void(BasicEventLoop &)> &main_function) {
-  BasicEventLoop loop;
-  auto loop_execute = loop.async([&loop, &main_function] { main_function(loop); });
-  auto loop_stop = loop.async([&loop] { loop.stop(); });
-
-  loop_execute().then(loop_stop).detach();
-  loop.run();
 }
 
 inline BasicEventLoop::BasicEventLoop() {
@@ -141,13 +153,6 @@ inline Future<void> BasicEventLoop::deadline(const std::chrono::time_point<std::
   auto task = [promise = std::move(promise)] mutable { std::move(promise).fulfill(); };
   pending_timed_tasks.emplace(time, std::move(task));
   return std::move(future);
-}
-
-inline Future<void> BasicEventLoop::forever() {
-  return execute([this] {
-    auto [promise, future] = Contract<void>();
-    await(std::move(future));
-  });
 }
 
 inline IOTasksQueue::Handle BasicEventLoop::register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback) {

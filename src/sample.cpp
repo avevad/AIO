@@ -6,7 +6,6 @@
 #include <iostream>
 #include <memory>
 #include <utility>
-#include <variant>
 
 void sample_contexts() {
   std::cout << "-----------Contexts-----------" << std::endl;
@@ -99,31 +98,34 @@ void sample_event_loop() {
   using namespace std::chrono_literals;
   std::cout << "----------Event loop----------" << std::endl;
 
-  AIO::run([](AIO::BasicEventLoop &loop) -> void {
-    auto calculate = loop.async([&loop] -> int {
+  AIO::run_in_new([](AIO::BasicEventLoop *loop) -> void {
+    auto &std_in = loop->get_stdin();
+
+    auto calculated = loop->async([&loop] -> int {
       std::cout << "Calculating the number..." << std::endl;
-      loop.await(loop.timeout(1s));
+      loop->await(loop->timeout(1s));
       return 21;
     });
 
-    auto multiply_by_2 = loop.async([&loop](int x) -> int {
+    auto multiplied = loop->async([&loop](int x) -> int {
       std::cout << "Multiplying " << x << " by 2..." << std::endl;
-      loop.await(loop.timeout(1s));
+      loop->await(loop->timeout(1s));
       return x * 2;
     });
 
-    auto print_hello = loop.async([] -> void { std::cout << "  Hello from some noisy background task!" << std::endl; });
+    auto hello_printed =
+      loop->async([] -> void { std::cout << "  Hello from some noisy background task!" << std::endl; });
 
-    auto small_delay = [&loop]() { return loop.timeout(700ms); };
+    auto small_delay = [&loop]() { return loop->timeout(700ms); };
 
-    auto get_user_secret = loop.async([&loop](const std::optional<std::string> &user_name) -> std::string {
+    auto user_secret_obtained = loop->async([&loop](const std::optional<std::string> &user_name) -> std::string {
       std::cout << "Checking username..." << std::endl;
-      loop.await(loop.timeout(1s));
+      loop->await(loop->timeout(1s));
       if (user_name.value().length() > 10) {
         throw std::length_error("username is too long");
       }
       std::cout << "Obtaining user data..." << std::endl;
-      loop.await(loop.timeout(2s));
+      loop->await(loop->timeout(2s));
       if (user_name.value() != "avevad") {
         throw std::invalid_argument("user not found");
       }
@@ -131,13 +133,21 @@ void sample_event_loop() {
     });
 
     std::cout << "Beginning of main" << std::endl;
-    print_hello().then(print_hello).then(small_delay).then(print_hello).then(small_delay).then(print_hello).detach();
+
+    // Add some noise
+    small_delay()
+      .then(hello_printed)
+      .then(small_delay)
+      .then(hello_printed)
+      .then(small_delay)
+      .then(hello_printed)
+      .detach();
 
     std::cout << "Starting calculation..." << std::endl;
-    auto future = calculate().then(multiply_by_2);
+    auto ready = calculated().then(multiplied);
     std::cout << "Started calculate() function" << std::endl;
 
-    auto result = loop.await(std::move(future));
+    auto result = loop->await(std::move(ready));
     std::cout << "Result: " << result << std::endl;
 
     std::optional<std::string> user_name;
@@ -145,7 +155,7 @@ void sample_event_loop() {
     std::cout.flush();
     // Don't do actual reading - just wait for *some* data -- if STDIN is a terminal,
     // then a whole line would be ready for consequent std::istream read
-    if (loop.await(loop.get_stdin().read(0, nullptr) | loop.timeout(5s))) {
+    if (loop->await(std_in.ready(AIO::FD::IN) | loop->timeout(5s))) {
       std::cout << "Got it!" << std::endl;
 
       std::string name;
@@ -157,19 +167,26 @@ void sample_event_loop() {
       std::cout << "(timeout)" << std::endl;
     }
 
-    print_hello().then(print_hello).then(small_delay).then(print_hello).then(small_delay).then(print_hello).detach();
+    // Add more noise
+    small_delay()
+      .then(hello_printed)
+      .then(small_delay)
+      .then(hello_printed)
+      .then(small_delay)
+      .then(hello_printed)
+      .detach();
 
     try {
-      loop.await(get_user_secret(user_name)
-                   .then(loop.async([](const std::string &secret) {
-                     std::cout << "Here is your secret: '" << secret << "'" << std::endl;
-                   }))
-                   .except<std::invalid_argument>(loop.async([](const std::invalid_argument &e) {
-                     std::cout << "! Invalid input: " << e.what() << std::endl;
-                   }))
-                   .except<std::length_error>(loop.async([](const std::length_error &e) {
-                     std::cout << "! Overflow: " << e.what() << std::endl;
-                   })));
+      loop->await(user_secret_obtained(user_name)
+                    .then(loop->async([](const std::string &secret) {
+                      std::cout << "Here is your secret: '" << secret << "'" << std::endl;
+                    }))
+                    .except<std::invalid_argument>(loop->async([](const std::invalid_argument &e) {
+                      std::cout << "! Invalid input: " << e.what() << std::endl;
+                    }))
+                    .except<std::length_error>(loop->async([](std::length_error e) {
+                      std::cout << "! Overflow: " << e.what() << std::endl;
+                    })));
     } catch (std::bad_optional_access &) {
       // unhandled by .except()-clauses exceptions will be thrown out of await()
       std::cout << "No input detected in 5 seconds" << std::endl;
