@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euox pipefail
+
+do-install-deps() {
+  sudo apt update
+  sudo apt install $@
+}
+
+do-configure() {
+  cmake -B ./_build \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_CXX_COMPILER="$AIOXX_CXX" \
+    -DCMAKE_C_COMPILER="$AIOXX_CC" \
+    -DCMAKE_ASM_COMPILER="$AIOXX_CC" \
+    -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-sanitize-recover=all"
+}
+
+do-build() {
+  cmake --build ./_build --config Debug
+}
+
+do-test() {
+  cd ./_build
+  ctest -C Debug || ctest -C Debug --rerun-failed --output-on-failure
+}
+
+do-"$1" ${@:2}

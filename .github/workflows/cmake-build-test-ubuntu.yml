@@ -7,32 +7,20 @@ on:
     branches: [ "master" ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install toolchain
-        run: sudo apt update && sudo apt install clang-19
+        run: ci/pipeline install-deps clang-19
 
-      - name: Print toolchain version
-        run: clang --version
+      - name: Configure project
+        run: AIOXX_CC=clang-19 AIOXX_CXX=clang++-19 ci/pipeline configure
 
-      - name: Configure CMake
-        run: >
-          cmake -B ${{github.workspace}}/build 
-          -DCMAKE_BUILD_TYPE=Debug 
-          -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_C_COMPILER=clang-19 -DCMAKE_ASM_COMPILER=clang-19
-          -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-sanitize-recover=all"
+      - name: Build project
+        run: ci/pipeline build
 
-      - name: Build
-        run: cmake --build ${{github.workspace}}/build --config Debug
-
-      - name: Test
-        working-directory: ${{github.workspace}}/build
-        run: ctest -C Debug
-
-      - name: Re-run failed tests
-        working-directory: ${{github.workspace}}/build
-        run: ctest -C Debug --rerun-failed --output-on-failure
+      - name: Run unit tests
+        run: ci/pipeline test
