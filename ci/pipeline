@@ -6,6 +6,10 @@ do-install-deps() {
   sudo apt install $@
 }
 
+do-clean() {
+  rm -rf ./_build
+}
+
 do-configure() {
   cmake -B ./_build \
     -DCMAKE_BUILD_TYPE=Debug \
