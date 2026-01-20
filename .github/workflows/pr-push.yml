@@ -1,0 +1,56 @@
+name: 'PR & Push'
+
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+
+jobs:
+  ubuntu-clang-debug-san:
+    runs-on: ubuntu-latest
+    env:
+      AIOXX_CC: clang-19
+      AIOXX_CXX: clang++-19
+      AIOXX_DEPS: clang-19
+      AIOXX_BUILD: Debug
+      AIOXX_FLAGS: -fsanitize=undefined,address
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/pipeline install-deps
+      - run: ci/pipeline configure
+      - run: ci/pipeline build
+      - run: ci/pipeline test
+
+  ubuntu-clang-debug-cov:
+    runs-on: ubuntu-latest
+    env:
+      AIOXX_CC: clang-19
+      AIOXX_CXX: clang++-19
+      AIOXX_DEPS: clang-19
+      AIOXX_BUILD: Debug
+      AIOXX_FLAGS: -fcoverage-mapping -fprofile-instr-generate -O0
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/pipeline install-deps
+      - run: ci/pipeline configure
+      - run: ci/pipeline build
+      - run: ci/pipeline test
+      - run: ci/pipeline cover
+
+  ubuntu-clang-relwithdebinfo:
+    runs-on: ubuntu-latest
+    env:
+      AIOXX_CC: clang-19
+      AIOXX_CXX: clang++-19
+      AIOXX_DEPS: clang-19
+      AIOXX_BUILD: RelWithDebInfo
+      AIOXX_FLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/pipeline install-deps
+      - run: ci/pipeline configure
+      - run: ci/pipeline build
+      - run: ci/pipeline test

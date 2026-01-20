@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euox pipefail
 
+export LLVM_PROFILE_FILE="$(realpath ./_build)"/cov.profraw
+
 do-install-deps() {
   sudo apt update
-  sudo apt install $@
+  sudo apt install $AIOXX_DEPS
 }
 
 do-clean() {
@@ -12,20 +14,30 @@ do-clean() {
 
 do-configure() {
   cmake -B ./_build \
-    -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_BUILD_TYPE="$AIOXX_BUILD" \
     -DCMAKE_CXX_COMPILER="$AIOXX_CXX" \
     -DCMAKE_C_COMPILER="$AIOXX_CC" \
     -DCMAKE_ASM_COMPILER="$AIOXX_CC" \
-    -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-sanitize-recover=all"
+    -DCMAKE_CXX_FLAGS="$AIOXX_FLAGS" \
+    -DCMAKE_C_FLAGS="$AIOXX_FLAGS"
 }
 
 do-build() {
-  cmake --build ./_build --config Debug
+  cmake --build ./_build
 }
 
 do-test() {
-  cd ./_build
-  ctest -C Debug || ctest -C Debug --rerun-failed --output-on-failure
+  ./_build/aio-ut
+}
+
+do-cover() {
+  llvm-profdata merge \
+    -sparse "$LLVM_PROFILE_FILE" \
+    -o ./_build/cov.profdata
+  llvm-cov report ./_build/aio-ut \
+    -instr-profile=./_build/cov.profdata \
+    -show-region-summary=false \
+    -ignore-filename-regex='_build/_deps/'
 }
 
 do-"$1" ${@:2}
