@@ -36,7 +36,6 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(AIOXX_DEBUG=1)
 endif ()
 
-# Shared library
 add_library(aio-static STATIC
         src/util.cpp
         src/context.S
@@ -48,7 +47,6 @@ add_library(aio-static STATIC
 target_include_directories(aio-static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(aio-static PROPERTIES OUTPUT_NAME aioxx)
 
-# Static library
 add_library(aio-shared SHARED
         src/util.cpp
         src/context.S
@@ -64,15 +62,16 @@ if (AIOXX_BUILD_TESTS)
     enable_testing()
     include(GoogleTest)
 
-    # Unit tests executable
-    add_executable(ut
+    add_executable(aio-ut
             ut/context.cpp
             ut/coroutine.cpp
+            ut/future.cpp
+            ut/aio.cpp
     )
-    target_include_directories(ut PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(ut PRIVATE aio-static GTest::gtest_main)
+    target_include_directories(aio-ut PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(aio-ut PRIVATE aio-static GTest::gtest_main)
 
-    gtest_discover_tests(ut)
+    gtest_discover_tests(aio-ut)
 endif ()
 
 if (AIOXX_INSTALL)
