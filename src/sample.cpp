@@ -99,8 +99,6 @@ void sample_event_loop() {
   std::cout << "----------Event loop----------" << std::endl;
 
   AIO::run_in_new([](AIO::BasicEventLoop *loop) -> void {
-    auto &std_in = loop->get_stdin();
-
     auto calculated = loop->async([&loop] -> int {
       std::cout << "Calculating the number..." << std::endl;
       loop->await(loop->timeout(1s));
@@ -116,7 +114,7 @@ void sample_event_loop() {
     auto hello_printed =
       loop->async([] -> void { std::cout << "  Hello from some noisy background task!" << std::endl; });
 
-    auto small_delay = [&loop]() { return loop->timeout(700ms); };
+    auto small_delay = [&loop]() { return loop->timeout(500ms); };
 
     auto user_secret_obtained = loop->async([&loop](const std::optional<std::string> &user_name) -> std::string {
       std::cout << "Checking username..." << std::endl;
@@ -155,7 +153,7 @@ void sample_event_loop() {
     std::cout.flush();
     // Don't do actual reading - just wait for *some* data -- if STDIN is a terminal,
     // then a whole line would be ready for consequent std::istream read
-    if (loop->await(std_in.ready(AIO::FD::IN) | loop->timeout(5s))) {
+    if (loop->await(loop->std_in().ready(AIO::FD::IN) | loop->timeout(5s))) {
       std::cout << "Got it!" << std::endl;
 
       std::string name;

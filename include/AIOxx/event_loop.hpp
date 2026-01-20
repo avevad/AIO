@@ -4,14 +4,10 @@
 #include "fd.hpp"
 #include "future.hpp"
 #include "io.hpp"
-#include "util.hpp"
 
 #include <chrono>
-#include <list>
 #include <queue>
 #include <set>
-#include <utility>
-#include <variant>
 
 namespace AIO {
 
@@ -43,21 +39,16 @@ public:
 
   IOTasksQueue::Handle register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback);
 
-  const StreamFD &get_stdin();
-  const StreamFD &get_stdout();
-  const StreamFD &get_stderr();
+  const StreamFD &std_in();
+  const StreamFD &std_out();
+  const StreamFD &std_err();
 
   ~BasicEventLoop();
 
 private:
-  struct CoroutineHolder : std::enable_shared_from_this<CoroutineHolder> {
-    template<typename Functor>
-    explicit CoroutineHolder(Functor fun);
-
-    Coroutine<void()> wrapped;
-  };
-
   using Task = std::move_only_function<void()>;
+  using Fiber = Coroutine<void()>;
+  using FiberPtr = std::unique_ptr<Fiber>;
 
   struct TimedTask {
     std::chrono::time_point<std::chrono::steady_clock> when;
@@ -71,18 +62,18 @@ private:
   friend void run_in_new(MainFunctor &&main);
 
   void run();
-  [[noreturn]] void stop();
+  void stop();
 
-  void do_coroutine_step(std::shared_ptr<CoroutineHolder> coro);
+  void resume_fiber(FiberPtr fiber);
 
   std::queue<Task> pending_tasks = {};
   std::multiset<TimedTask> pending_timed_tasks = {};
   IOTasksQueue pending_io_tasks = {};
 
   bool stopped = false;
-  std::optional<std::shared_ptr<CoroutineHolder>> current_coro = std::nullopt;
+  FiberPtr current_fiber = nullptr;
 
-  std::optional<StreamFD> std_in = std::nullopt, std_out = std::nullopt, std_err = std::nullopt;
+  StreamFD in, out, err;
 };
 
 } // namespace AIO
