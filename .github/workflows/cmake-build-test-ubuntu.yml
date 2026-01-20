@@ -32,3 +32,7 @@ jobs:
       - name: Test
         working-directory: ${{github.workspace}}/build
         run: ctest -C Debug
+
+      - name: Re-run failed tests
+        working-directory: ${{github.workspace}}/build
+        run: ctest -C Debug --rerun-failed --output-on-failure
