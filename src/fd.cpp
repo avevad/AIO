@@ -52,8 +52,10 @@ Future<void> FD::ready(Direction direction) const {
 }
 
 FD::FD(BasicScheduler *sched, SystemFD sys_fd) : fd(sys_fd), state(nullptr) {
-  state = std::make_unique<State>(sched, std::nullopt);
-  state->io_handle.emplace(sched->register_system_fd(fd, [state = state.get()](auto e) { state->io_callback(e); }));
+  state = std::make_shared<State>(sched, std::nullopt);
+  state->io_handle.emplace(sched->register_system_fd(fd, [state = this->state](auto e) {
+    state->io_callback(e);
+  }));
 }
 
 void FD::State::io_callback(IOTasksQueue::EventTypes event_types) {

@@ -238,7 +238,7 @@ template<typename Callback>
 IOTasksQueue::Handle BasicScheduler::register_system_fd(SystemFD fd, Callback &&callback) {
   return pending_io_tasks.create(
     fd, [this, callback = std::forward<Callback>(callback)](IOTasksQueue::EventTypes e) mutable {
-      available_tasks.push([callback = std::move(callback), e] { callback(e); });
+      available_tasks.push([callback, e] { callback(e); });
     }
   );
 }

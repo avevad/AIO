@@ -46,7 +46,9 @@ private:
   };
 
   SystemFD fd;
-  std::unique_ptr<State> state;
+  std::shared_ptr<State> state; // TODO: remove this temporary fix for use-after-free
+  // If we use unique_ptr here, we will have to store raw .get() in IO callback,
+  // which can already be expired at the moment the callback is executed.
 };
 
 class StreamFD : public FD {

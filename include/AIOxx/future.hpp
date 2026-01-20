@@ -391,7 +391,7 @@ namespace _impl {
         } catch (const CoroutineKiller &) {
           // TODO: this shouldn't be here. See `BasicEventLoop::fiber()`.
         } catch (...) {
-          warning("unhandled error in detached future", result.move_as_err());
+          warning("unhandled error in detached future", std::current_exception());
         }
       }
     });
