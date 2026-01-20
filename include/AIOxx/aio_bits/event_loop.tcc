@@ -2,7 +2,6 @@
 
 #include <thread>
 #include <utility>
-#include "AIOxx/event_loop.hpp"
 
 namespace AIO {
 
@@ -21,6 +20,9 @@ Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::fiber(Functor &&f
         std::apply(invoker, std::move(args));
         std::move(promise).fulfill();
       }
+      /*
+    TODO: with proper implementation of Future cancelling this should look like this:
+    } catch (const _impl::CoroutineKiller &) {*/
     } catch (...) {
       std::move(promise).fail_any(std::current_exception());
     }
@@ -112,9 +114,14 @@ inline void BasicEventLoop::yield() {
 }
 
 inline void BasicEventLoop::stop() {
-  stopped = true;
-  yield();
-  AIOXX_UNREACHABLE;
+  AIOXX_ASSUME(current_fiber != nullptr);
+  auto &fiber = *current_fiber;
+  available_tasks.emplace([this, fiber = std::move(current_fiber)] mutable {
+    stopped = true;
+    fiber->kill();
+    fiber.reset();
+  });
+  fiber.yield();
 }
 
 inline void BasicEventLoop::resume_fiber(FiberPtr fiber) {
@@ -186,6 +193,7 @@ inline void BasicEventLoop::run() {
 }
 
 inline BasicEventLoop::~BasicEventLoop() {
+  AIOXX_ASSUME(current_fiber == nullptr);
   for (auto *fd : {&in, &out, &err}) {
     (void) std::move(*fd).release_to_system();
   }

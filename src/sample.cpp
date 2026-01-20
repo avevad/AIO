@@ -153,17 +153,14 @@ void sample_event_loop() {
     std::cout.flush();
     // Don't do actual reading - just wait for *some* data -- if STDIN is a terminal,
     // then a whole line would be ready for consequent std::istream read
-    if (loop->await(loop->std_in().ready(AIO::FD::IN) | loop->timeout(5s))) {
-      std::cout << "Got it!" << std::endl;
+    loop->await(loop->std_in().ready(AIO::FD::IN));
+    std::cout << "Got it!" << std::endl;
 
-      std::string name;
-      std::getline(std::cin, name);
+    std::string name;
+    std::getline(std::cin, name);
 
-      std::cout << "Hello, " << name << "" << std::endl;
-      user_name = name;
-    } else {
-      std::cout << "(timeout)" << std::endl;
-    }
+    std::cout << "Hello, " << name << "" << std::endl;
+    user_name = name;
 
     // Add more noise
     small_delay()

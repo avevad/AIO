@@ -1,7 +1,5 @@
 #pragma once
 
-#include "AIOxx/coroutine.hpp"
-
 #include <utility>
 
 namespace AIO::_impl {
@@ -65,9 +63,7 @@ void CoroutineBase<Ret, Arg, Derived>::kill() {
 
 template<typename Ret, typename Arg, typename Derived>
 CoroutineBase<Ret, Arg, Derived>::~CoroutineBase() {
-  if (!is_dead()) {
-    warning("destroying runnable coroutine");
-  }
+  AIOXX_ASSUME(is_dead());
 }
 
 template<typename Ret, typename Arg, typename Derived>

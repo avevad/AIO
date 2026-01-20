@@ -146,7 +146,8 @@ public:
 };
 
 template<>
-class [[nodiscard]] Future<void> final : public _impl::FutureBase<_impl::Void, Future<_impl::Void>, Promise<_impl::Void>> {
+class [[nodiscard]] Future<void> final
+    : public _impl::FutureBase<_impl::Void, Future<_impl::Void>, Promise<_impl::Void>> {
 public:
   template<typename Res1>
   using Mapped = Future<Res1>;
@@ -193,7 +194,8 @@ public:
 };
 
 template<>
-class [[nodiscard]] Promise<void> final : public _impl::PromiseBase<_impl::Void, Promise<_impl::Void>, Future<_impl::Void>> {
+class [[nodiscard]] Promise<void> final
+    : public _impl::PromiseBase<_impl::Void, Promise<_impl::Void>, Future<_impl::Void>> {
 public:
   template<typename Res1>
   using Mapped = Promise<Res1>;
@@ -216,10 +218,6 @@ public:
   Promise<Res> promise = {};
   Future<Res> future = {};
 };
-
-// TODO: this is ugly and wrong, should be refactored after implementing Future.cancel()
-template<typename Res, typename Res1>
-Future<bool> operator|(Future<Res> &&future1, Future<Res1> &&future2);
 } // namespace AIO
 
 #include "aio_bits/future.tcc"

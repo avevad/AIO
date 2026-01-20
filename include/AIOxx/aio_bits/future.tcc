@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include "AIOxx/coroutine.hpp"
+
 namespace AIO {
 namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
@@ -161,7 +163,13 @@ namespace _impl {
   void FutureBase<Res, Future, Promise>::detach() && {
     std::move(*this).consume_with([](ExpectedResult result) {
       if (!result.is_ok()) {
-        warning("unhandled error in detached future", result.move_as_err());
+        try {
+          std::rethrow_exception(result.move_as_err());
+        } catch (const CoroutineKiller &) {
+          // TODO: this shouldn't be here. See `BasicEventLoop::fiber()`.
+        } catch (...) {
+          warning("unhandled error in detached future", result.move_as_err());
+        }
       }
     });
   }
@@ -217,9 +225,7 @@ namespace _impl {
 
   template<FutureResult Res, typename Promise, typename Future>
   PromiseBase<Res, Promise, Future>::~PromiseBase() {
-    if (!is_free()) {
-      warning("destroying unfulfilled promise");
-    }
+    AIOXX_ASSUME(is_free());
   }
 
   template<FutureResult Res, typename Promise, typename Future>
@@ -377,38 +383,4 @@ inline void Promise<void>::fulfill() && {
   std::move(*this).PromiseBase::fulfill(_impl::Void{});
 }
 
-// TODO: this is ugly and wrong, should be refactored after implementing Future.cancel()
-template<typename Res1, typename Res2>
-Future<bool> operator|(Future<Res1> &&future1, Future<Res2> &&future2) {
-  auto [promise, future] = Contract<bool>();
-
-  struct State {
-    Promise<bool> promise;
-    bool done = false;
-  };
-  std::shared_ptr<State> state = std::make_shared<State>();
-  state->promise = std::move(promise);
-
-  std::move(future1)
-    .map_expected([state](auto...) mutable {
-      if (!state->done) {
-        state->done = true;
-        std::move(state->promise).fulfill(true);
-      }
-      return Expected<void>{};
-    })
-    .detach();
-
-  std::move(future2)
-    .map_expected([state](auto...) mutable {
-      if (!state->done) {
-        state->done = true;
-        std::move(state->promise).fulfill(false);
-      }
-      return Expected<void>{};
-    })
-    .detach();
-
-  return std::move(future);
-}
 } // namespace AIO
