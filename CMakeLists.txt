@@ -65,7 +65,10 @@ if (AIOXX_BUILD_TESTS)
     include(GoogleTest)
 
     # Unit tests executable
-    add_executable(ut src/ut.cpp)
+    add_executable(ut
+            ut/context.cpp
+            ut/coroutine.cpp
+    )
     target_include_directories(ut PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(ut PRIVATE aio-static GTest::gtest_main)
 

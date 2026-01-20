@@ -65,5 +65,3 @@ protected:
 };
 
 } // namespace AIO
-
-#include "aio_bits/fd.tcc"
