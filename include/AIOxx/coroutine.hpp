@@ -523,6 +523,7 @@ CoroutineIterator<Ret> &CoroutineIterator<Ret>::operator++() {
 template<typename Ret>
 bool CoroutineIterator<Ret>::operator==(const CoroutineIterator &other) const {
   obtain_value();
+  other.obtain_value();
 
   return coro == nullptr && other.coro == nullptr;
 }
@@ -543,6 +544,7 @@ void CoroutineIterator<Ret>::obtain_value() const {
   if (coro->is_dead()) {
     coro = nullptr;
     holder = std::nullopt;
+    return;
   }
 
   try {
