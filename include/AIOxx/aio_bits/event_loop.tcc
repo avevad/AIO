@@ -28,9 +28,9 @@ Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::fiber(Functor &&f
 
     // It is fiber's responsibility to deschedule itself, but we cannot destroy it right here as it is still alive.
     // Instead, we deschedule the fiber from the loop and schedule a task to dispose of the fiber after its completion.
-    pending_tasks.push([fiber = std::move(current_fiber)] mutable { fiber.reset(); });
+    available_tasks.push([fiber = std::move(current_fiber)] mutable { fiber.reset(); });
   });
-  pending_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
+  available_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
   return std::move(future);
 }
 
@@ -54,7 +54,7 @@ Res BasicEventLoop::await(Future<Res> future) {
       [this, fiber = std::move(current_fiber),
        &expected](std::expected<Res, std::exception_ptr> expected1) mutable -> std::expected<void, std::exception_ptr> {
         expected = std::move(expected1);
-        pending_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
+        available_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
         return {};
       }
     )
@@ -62,7 +62,7 @@ Res BasicEventLoop::await(Future<Res> future) {
 
   // Future consumer will live until executed once and the fiber will be held at least to this point.
   // Then the fiber will be moved into queue and by that means will live until resumed.
-  // However, the consumer can be executed immediately, so TODO - examine fiber lifetime more carefully at this moment:
+  // However, the consumer can be executed immediately, so TODO -- examine fiber lifetime more carefully at this moment:
   fiber.yield();
 
   if (!expected.has_value())
@@ -88,21 +88,15 @@ void run_in_new(MainFunctor &&main) {
   BasicEventLoop loop;
 
   auto main_executed = loop.async([loop = &loop, main = std::forward<MainFunctor>(main)] { main(loop); });
-  auto exception_caught = loop.async([](const std::exception &e) { panic("unhandled exception in main function", e); });
-  auto anything_caught =
-    loop.async([](const std::exception_ptr &) { panic("unhandled unknown exception in main function"); });
+  auto exception_caught = loop.async([](auto err) { panic("unhandled exception", err); });
   auto loop_stopped = loop.async([loop = &loop] { loop->stop(); });
 
-  main_executed()
-    .template except<std::exception>(exception_caught)
-    .except_any(anything_caught)
-    .then(loop_stopped)
-    .detach();
+  main_executed().except_any(exception_caught).then(loop_stopped).detach();
 
   loop.run();
 }
 
-inline bool BasicEventLoop::TimedTask::operator<(const TimedTask &task1) const {
+inline bool BasicEventLoop::PendingTimedTask::operator<(const PendingTimedTask &task1) const {
   return when < task1.when;
 }
 
@@ -149,56 +143,45 @@ inline Future<void> BasicEventLoop::deadline(const std::chrono::time_point<std::
   return std::move(future);
 }
 
-inline IOTasksQueue::Handle BasicEventLoop::register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback) {
-  return pending_io_tasks.push(fd, std::move(callback));
+template<typename Callback>
+IOTasksQueue::Handle BasicEventLoop::register_system_fd(SystemFD fd, Callback &&callback) {
+  return pending_io_tasks.create(
+    fd, [this, callback = std::forward<Callback>(callback)](IOTasksQueue::EventTypes e) mutable {
+      available_tasks.push([callback = std::move(callback), e] { callback(e); });
+    }
+  );
 }
 
 inline void BasicEventLoop::run() {
   try {
     while (!stopped) {
-      // Check regular tasks that are available unconditionally
-      if (!pending_tasks.empty()) {
-        Task task = std::move(pending_tasks.front());
-        pending_tasks.pop();
+      { // Check pending tasks for immediate availability -- this is crucial for fairness guarantee.
+        auto now = std::chrono::steady_clock::now();
+        while (!pending_timed_tasks.empty() && pending_timed_tasks.begin()->when <= now) {
+          PendingTimedTask task = std::move(pending_timed_tasks.extract(pending_timed_tasks.begin()).value());
+          available_tasks.push(std::move(task.what));
+        }
+        if (auto schedule = pending_io_tasks.poll(now))
+          (*schedule)();
+      }
+
+      // Execute first available task, if any.
+      if (!available_tasks.empty()) {
+        Task task = std::move(available_tasks.front());
+        available_tasks.pop();
         task();
         continue;
       }
 
-      // Check timed tasks that are already available right now
-      auto now = std::chrono::steady_clock::now();
-      if (!pending_timed_tasks.empty() && pending_timed_tasks.begin()->when <= now) {
-        TimedTask task = std::move(pending_timed_tasks.extract(pending_timed_tasks.begin()).value());
-        task.what();
-        continue;
+      { // Otherwise block on I/O and wait until anything happens...
+        AIOXX_ASSUME(!pending_io_tasks.empty());
+        auto deadline = pending_timed_tasks.empty() ? std::nullopt : std::optional{pending_timed_tasks.begin()->when};
+        if (auto schedule = pending_io_tasks.poll(deadline))
+          (*schedule)();
       }
-
-      // Check I/O tasks (which would probably block)
-      if (!pending_io_tasks.is_empty()) {
-        std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline = std::nullopt;
-        if (!pending_timed_tasks.empty()) {
-          deadline = pending_timed_tasks.begin()->when;
-        }
-        auto maybe_task = pending_io_tasks.poll(deadline);
-        if (maybe_task.has_value()) {
-          maybe_task.value()();
-          continue;
-        }
-      }
-
-      // Check timed tasks (which would probably block)
-      if (!pending_timed_tasks.empty()) {
-        TimedTask task = std::move(pending_timed_tasks.extract(pending_timed_tasks.begin()).value());
-        std::this_thread::sleep_until(task.when);
-        task.what();
-        continue;
-      }
-
-      break;
     }
-  } catch (std::exception &e) {
-    panic("exception in event loop", e);
   } catch (...) {
-    panic("unknown exception in event loop");
+    panic("unexpected exception in event loop", std::current_exception());
   }
 }
 

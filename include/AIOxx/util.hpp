@@ -29,12 +29,12 @@ namespace AIO {
 [[noreturn]] void panic(const std::string &what, std::source_location where = std::source_location::current());
 
 [[noreturn]] void
-panic(const std::string &what, const std::exception &e, std::source_location where = std::source_location::current());
+panic(const std::string &what, std::exception_ptr err, std::source_location where = std::source_location::current());
 
 void warning(const std::string &what, std::source_location where = std::source_location::current());
 
 void warning(
-  const std::string &what, const std::exception &e, std::source_location where = std::source_location::current()
+  const std::string &what, std::exception_ptr err, std::source_location where = std::source_location::current()
 );
 
 template<typename Derived, typename Derived1>

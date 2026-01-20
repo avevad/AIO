@@ -10,12 +10,11 @@ using SystemFD = int;
 class IOTasksQueue {
 public:
   enum EventType : uint8_t { IN = 1, OUT = 2, ERR = 4, HUP = 8 };
-
   using EventTypes = uint8_t;
   using Task = std::move_only_function<void()>;
   using TaskCallback = std::move_only_function<void(EventTypes)>;
 
-  class Handle {
+  class [[nodiscard]] Handle {
   public:
     Handle(Handle &&other) noexcept;
 
@@ -35,12 +34,12 @@ public:
 
   IOTasksQueue();
 
-  Handle push(SystemFD fd, TaskCallback callback);
+  Handle create(SystemFD fd, TaskCallback callback);
   void update(Handle &handle, EventTypes event_types);
   void erase(Handle &&handle);
-  std::optional<Task> poll(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline);
+  [[nodiscard]] std::optional<Task> poll(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline);
 
-  [[nodiscard]] bool is_empty() const;
+  [[nodiscard]] bool empty() const;
 
   ~IOTasksQueue();
 

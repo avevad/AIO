@@ -161,13 +161,7 @@ namespace _impl {
   void FutureBase<Res, Future, Promise>::detach() && {
     std::move(*this).consume_with([](ExpectedResult result) {
       if (!result.is_ok()) {
-        try {
-          std::rethrow_exception(result.move_as_err());
-        } catch (std::exception &e) {
-          warning("unhandled error in detached future", e);
-        } catch (...) {
-          warning("unhandled unknown error in detached future");
-        }
+        warning("unhandled error in detached future", result.move_as_err());
       }
     });
   }

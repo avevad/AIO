@@ -37,8 +37,6 @@ public:
 
   void yield();
 
-  IOTasksQueue::Handle register_system_fd(SystemFD fd, IOTasksQueue::TaskCallback callback);
-
   const StreamFD &std_in();
   const StreamFD &std_out();
   const StreamFD &std_err();
@@ -46,15 +44,14 @@ public:
   ~BasicEventLoop();
 
 private:
-  using Task = std::move_only_function<void()>;
   using Fiber = Coroutine<void()>;
   using FiberPtr = std::unique_ptr<Fiber>;
-
-  struct TimedTask {
+  using Task = std::move_only_function<void()>;
+  struct PendingTimedTask {
     std::chrono::time_point<std::chrono::steady_clock> when;
     Task what;
 
-    bool operator<(const TimedTask &task1) const;
+    bool operator<(const PendingTimedTask &task1) const;
   };
 
   // TODO: better startup mechanism
@@ -66,8 +63,14 @@ private:
 
   void resume_fiber(FiberPtr fiber);
 
-  std::queue<Task> pending_tasks = {};
-  std::multiset<TimedTask> pending_timed_tasks = {};
+  // TODO: better interface between FD and event loop
+  friend class FD;
+
+  template<typename Callback>
+  IOTasksQueue::Handle register_system_fd(SystemFD fd, Callback &&callback);
+
+  std::queue<Task> available_tasks = {};
+  std::multiset<PendingTimedTask> pending_timed_tasks = {};
   IOTasksQueue pending_io_tasks = {};
 
   bool stopped = false;
