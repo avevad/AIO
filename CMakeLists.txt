@@ -60,10 +60,6 @@ add_library(aio-shared SHARED
 target_include_directories(aio-shared PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(aio-shared PROPERTIES OUTPUT_NAME aioxx)
 
-# Sample executable
-add_executable(sample src/sample.cpp)
-target_link_libraries(sample PRIVATE aio-static)
-
 if (AIOXX_BUILD_TESTS)
     enable_testing()
     include(GoogleTest)
