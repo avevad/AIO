@@ -1,4 +1,4 @@
-#include "AIOxx/net_fd.hpp"
+#include "AIOxx/net.hpp"
 
 #include <cstring>
 #include <fcntl.h>
@@ -56,24 +56,24 @@ SystemFD make_server_socket(const std::string &host, const std::string &service)
   return fd;
 }
 
-StreamServerFD::StreamServerFD(BasicEventLoop &loop, const std::string &host, const std::string &service)
-    : FD(loop, make_server_socket(host, service)) {
+StreamServerFD::StreamServerFD(BasicScheduler *sched, const std::string &host, const std::string &service)
+    : FD(sched, make_server_socket(host, service)) {
 }
 
 Future<StreamSocketFD> StreamServerFD::accept() {
   return ready(IN).map_result([this] -> StreamSocketFD {
     sockaddr addr{};
     socklen_t len{};
-    int fd = ::accept(get_sys_fd(), &addr, &len);
+    int fd = ::accept(sys_fd(), &addr, &len);
     if (fd < 0) {
       throw SystemError(std::string("accept: ") + strerror(errno));
     }
-    return {get_event_loop(), fd};
+    return {scheduler(), fd};
   });
 }
 
 Future<StreamSocketFD>
-StreamSocketFD::connect(BasicEventLoop &loop, const std::string &host, const std::string &service) {
+StreamSocketFD::connect(BasicScheduler *sched, const std::string &host, const std::string &service) {
   addrinfo *addr_info = parse_host_service_pair(host, service, false);
 
   int fd = socket(addr_info->ai_family, addr_info->ai_socktype | SOCK_NONBLOCK, addr_info->ai_protocol);
@@ -90,17 +90,17 @@ StreamSocketFD::connect(BasicEventLoop &loop, const std::string &host, const std
 
   freeaddrinfo(addr_info);
 
-  StreamSocketFD socket_fd(loop, fd);
+  StreamSocketFD socket_fd(sched, fd);
   auto connected = socket_fd.ready(OUT);
   return std::move(connected).map_result([socket_fd = std::move(socket_fd)] mutable -> StreamSocketFD {
     int err = 0;
     socklen_t err_len = sizeof err;
-    if (getsockopt(socket_fd.get_sys_fd(), SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
-      close(socket_fd.get_sys_fd());
+    if (getsockopt(socket_fd.sys_fd(), SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
+      close(socket_fd.sys_fd());
       throw SystemError(std::string("getsockopt: ") + strerror(errno));
     }
     if (err) {
-      close(socket_fd.get_sys_fd());
+      close(socket_fd.sys_fd());
       throw SystemError(std::string("connect: ") + strerror(err));
     }
 
@@ -119,16 +119,16 @@ void StreamSocketFD::shutdown(bool read, bool write) const {
   } else {
     AIOXX_UNREACHABLE;
   }
-  ::shutdown(get_sys_fd(), how);
+  ::shutdown(sys_fd(), how);
 }
 
 StreamSocketFD::~StreamSocketFD() {
-  if (get_sys_fd() != -1) {
+  if (sys_fd() != -1) {
     shutdown();
   }
 }
 
-StreamSocketFD::StreamSocketFD(BasicEventLoop &loop, SystemFD sys_fd) : StreamFD(loop, sys_fd) {
+StreamSocketFD::StreamSocketFD(BasicScheduler *sched, SystemFD sys_fd) : StreamFD(sched, sys_fd) {
 }
 
 StreamServerFD::StreamServerFD(StreamServerFD &&other) noexcept : FD(std::move(other)) {

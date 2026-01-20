@@ -6,7 +6,7 @@
 namespace AIO {
 
 template<typename Functor, typename... Args>
-Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::fiber(Functor &&fun, Args &&...args) {
+Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&fun, Args &&...args) {
   using Res = std::invoke_result_t<Functor, Args...>;
   auto [promise, future] = Contract<Res>();
   auto fiber = std::make_unique<Fiber>([this, fun = std::forward<Functor>(fun),
@@ -29,7 +29,7 @@ Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::fiber(Functor &&f
     AIOXX_ASSUME(current_fiber != nullptr);
 
     // It is fiber's responsibility to deschedule itself, but we cannot destroy it right here as it is still alive.
-    // Instead, we deschedule the fiber from the loop and schedule a task to dispose of the fiber after its completion.
+    // Instead, we deschedule the fiber and schedule a task to dispose of the fiber after its completion.
     available_tasks.push([fiber = std::move(current_fiber)] mutable { fiber.reset(); });
   });
   available_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
@@ -37,14 +37,14 @@ Future<std::invoke_result_t<Functor, Args...>> BasicEventLoop::fiber(Functor &&f
 }
 
 template<typename Functor>
-auto BasicEventLoop::async(Functor &&fun) {
+auto BasicScheduler::async(Functor &&fun) {
   return [this, fun = std::forward<Functor>(fun)]<typename... Args>(Args &&...args) {
     return this->fiber(fun, std::forward<Args>(args)...);
   };
 }
 
 template<typename Res>
-Res BasicEventLoop::await(Future<Res> future) {
+Res BasicScheduler::await(Future<Res> future) {
   AIOXX_ASSUME(current_fiber != nullptr);
 
   // See comments below.
@@ -77,7 +77,7 @@ Res BasicEventLoop::await(Future<Res> future) {
 }
 
 template<typename Rep, typename Period>
-Future<void> BasicEventLoop::timeout(const std::chrono::duration<Rep, Period> &duration) {
+Future<void> BasicScheduler::timeout(const std::chrono::duration<Rep, Period> &duration) {
   return deadline(
     std::chrono::steady_clock::now() +
     std::chrono::duration_cast<
@@ -87,33 +87,33 @@ Future<void> BasicEventLoop::timeout(const std::chrono::duration<Rep, Period> &d
 
 template<typename MainFunctor>
 void run_in_new(MainFunctor &&main) {
-  BasicEventLoop loop;
+  auto sched = std::make_unique<BasicScheduler>();
 
-  auto main_executed = loop.async([loop = &loop, main = std::forward<MainFunctor>(main)] { main(loop); });
-  auto exception_caught = loop.async([](auto err) { panic("unhandled exception", err); });
-  auto loop_stopped = loop.async([loop = &loop] { loop->stop(); });
+  auto main_executed = sched->async([sched = sched.get(), main = std::forward<MainFunctor>(main)] { main(sched); });
+  auto exception_caught = sched->async([](auto err) { panic("unhandled exception", err); });
+  auto sched_stopped = sched->async([sched = sched.get()] { sched->stop(); });
 
-  main_executed().except_any(exception_caught).then(loop_stopped).detach();
+  main_executed().except_any(exception_caught).then(sched_stopped).detach();
 
-  loop.run();
+  sched->run();
 }
 
-inline bool BasicEventLoop::PendingTimedTask::operator<(const PendingTimedTask &task1) const {
+inline bool BasicScheduler::PendingTimedTask::operator<(const PendingTimedTask &task1) const {
   return when < task1.when;
 }
 
-inline BasicEventLoop::BasicEventLoop()
-    : in(StreamFD::steal_from_system(*this, 0)), out(StreamFD::steal_from_system(*this, 1)),
-      err(StreamFD::steal_from_system(*this, 2)) {
+inline BasicScheduler::BasicScheduler()
+    : in(StreamFD::steal_from_system(this, 0)), out(StreamFD::steal_from_system(this, 1)),
+      err(StreamFD::steal_from_system(this, 2)) {
 }
 
-inline void BasicEventLoop::yield() {
+inline void BasicScheduler::yield() {
   auto [promise, future] = AIO::Contract<void>();
   std::move(promise).fulfill();
   await(std::move(future));
 }
 
-inline void BasicEventLoop::stop() {
+inline void BasicScheduler::stop() {
   AIOXX_ASSUME(current_fiber != nullptr);
   auto &fiber = *current_fiber;
   available_tasks.emplace([this, fiber = std::move(current_fiber)] mutable {
@@ -124,26 +124,26 @@ inline void BasicEventLoop::stop() {
   fiber.yield();
 }
 
-inline void BasicEventLoop::resume_fiber(FiberPtr fiber) {
+inline void BasicScheduler::resume_fiber(FiberPtr fiber) {
   AIOXX_ASSUME(current_fiber == nullptr);
   current_fiber = std::move(fiber);
   current_fiber->resume();
   AIOXX_ASSUME(current_fiber == nullptr);
 }
 
-inline const StreamFD &BasicEventLoop::std_in() {
+inline const StreamFD &BasicScheduler::std_in() {
   return in;
 }
 
-inline const StreamFD &BasicEventLoop::std_out() {
+inline const StreamFD &BasicScheduler::std_out() {
   return out;
 }
 
-inline const StreamFD &BasicEventLoop::std_err() {
+inline const StreamFD &BasicScheduler::std_err() {
   return err;
 }
 
-inline Future<void> BasicEventLoop::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
+inline Future<void> BasicScheduler::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
   auto [promise, future] = Contract<void>();
   auto task = [promise = std::move(promise)] mutable { std::move(promise).fulfill(); };
   pending_timed_tasks.emplace(time, std::move(task));
@@ -151,7 +151,7 @@ inline Future<void> BasicEventLoop::deadline(const std::chrono::time_point<std::
 }
 
 template<typename Callback>
-IOTasksQueue::Handle BasicEventLoop::register_system_fd(SystemFD fd, Callback &&callback) {
+IOTasksQueue::Handle BasicScheduler::register_system_fd(SystemFD fd, Callback &&callback) {
   return pending_io_tasks.create(
     fd, [this, callback = std::forward<Callback>(callback)](IOTasksQueue::EventTypes e) mutable {
       available_tasks.push([callback = std::move(callback), e] { callback(e); });
@@ -159,7 +159,7 @@ IOTasksQueue::Handle BasicEventLoop::register_system_fd(SystemFD fd, Callback &&
   );
 }
 
-inline void BasicEventLoop::run() {
+inline void BasicScheduler::run() {
   try {
     while (!stopped) {
       { // Check pending tasks for immediate availability -- this is crucial for fairness guarantee.
@@ -188,11 +188,11 @@ inline void BasicEventLoop::run() {
       }
     }
   } catch (...) {
-    panic("unexpected exception in event loop", std::current_exception());
+    panic("unexpected exception in scheduler", std::current_exception());
   }
 }
 
-inline BasicEventLoop::~BasicEventLoop() {
+inline BasicScheduler::~BasicScheduler() {
   AIOXX_ASSUME(current_fiber == nullptr);
   for (auto *fd : {&in, &out, &err}) {
     (void) std::move(*fd).release_to_system();

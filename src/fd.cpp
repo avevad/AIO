@@ -3,7 +3,7 @@
 #include <cstring>
 #include <fcntl.h>
 
-#include "AIOxx/event_loop.hpp"
+#include "AIOxx/scheduler.hpp"
 
 namespace AIO {
 
@@ -19,12 +19,12 @@ FD::~FD() {
   }
 }
 
-SystemFD FD::get_sys_fd() const {
+SystemFD FD::sys_fd() const {
   return fd;
 }
 
-BasicEventLoop &FD::get_event_loop() const {
-  return state->loop;
+BasicScheduler *FD::scheduler() const {
+  return state->sched;
 }
 
 FD::FD(FD &&other) noexcept : fd(other.fd), state(std::move(other.state)) {
@@ -51,9 +51,9 @@ Future<void> FD::ready(Direction direction) const {
   return std::move(future);
 }
 
-FD::FD(BasicEventLoop &loop, SystemFD sys_fd) : fd(sys_fd), state(nullptr) {
-  state = std::make_unique<State>(loop, std::nullopt);
-  state->io_handle.emplace(loop.register_system_fd(fd, [state = state.get()](auto e) { state->io_callback(e); }));
+FD::FD(BasicScheduler *sched, SystemFD sys_fd) : fd(sys_fd), state(nullptr) {
+  state = std::make_unique<State>(sched, std::nullopt);
+  state->io_handle.emplace(sched->register_system_fd(fd, [state = state.get()](auto e) { state->io_callback(e); }));
 }
 
 void FD::State::io_callback(IOTasksQueue::EventTypes event_types) {
@@ -70,7 +70,7 @@ void FD::State::io_callback(IOTasksQueue::EventTypes event_types) {
   );
 }
 
-StreamFD StreamFD::open(BasicEventLoop &loop, const std::filesystem::path &path, std::ios_base::openmode mode) {
+StreamFD StreamFD::open(BasicScheduler *sched, const std::filesystem::path &path, std::ios_base::openmode mode) {
   int flags = 0;
   if (mode & std::ios::in) {
     flags = O_RDONLY;
@@ -82,16 +82,16 @@ StreamFD StreamFD::open(BasicEventLoop &loop, const std::filesystem::path &path,
     flags = O_RDWR;
   }
   SystemFD sys_fd = ::open(path.c_str(), flags);
-  return {loop, sys_fd};
+  return {sched, sys_fd};
 }
 
-StreamFD StreamFD::steal_from_system(BasicEventLoop &loop, SystemFD sys_fd) {
-  return {loop, sys_fd};
+StreamFD StreamFD::steal_from_system(BasicScheduler *sched, SystemFD sys_fd) {
+  return {sched, sys_fd};
 }
 
 std::size_t StreamFD::read(size_t size, char *data) const {
-  get_event_loop().await(ready(IN));
-  auto read_size = ::read(get_sys_fd(), data, size);
+  scheduler()->await(ready(IN));
+  auto read_size = ::read(sys_fd(), data, size);
   if (read_size < 0) {
     throw SystemError(std::string("read: ") + strerror(errno));
   }
@@ -99,15 +99,15 @@ std::size_t StreamFD::read(size_t size, char *data) const {
 }
 
 std::size_t StreamFD::write(size_t size, const char *data) const {
-  get_event_loop().await(ready(OUT));
-  auto write_size = ::write(get_sys_fd(), data, size);
+  scheduler()->await(ready(OUT));
+  auto write_size = ::write(sys_fd(), data, size);
   if (write_size < 0) {
     throw SystemError(std::string("write: ") + strerror(errno));
   }
   return write_size;
 }
 
-StreamFD::StreamFD(BasicEventLoop &loop, SystemFD sys_fd) : FD(loop, sys_fd) {
+StreamFD::StreamFD(BasicScheduler *sched, SystemFD sys_fd) : FD(sched, sys_fd) {
 }
 
 } // namespace AIO
