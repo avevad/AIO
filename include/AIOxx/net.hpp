@@ -5,7 +5,7 @@
 namespace AIO {
 class StreamSocketFD : public StreamFD {
 public:
-  static Future<StreamSocketFD> connect(BasicEventLoop &loop, const std::string &host, const std::string &service);
+  static Future<StreamSocketFD> connect(BasicScheduler *sched, const std::string &host, const std::string &service);
 
   StreamSocketFD(StreamSocketFD &&other) noexcept = default;
   StreamSocketFD &operator=(StreamSocketFD &&other) noexcept = default;
@@ -15,7 +15,7 @@ public:
   ~StreamSocketFD();
 
 private:
-  StreamSocketFD(BasicEventLoop &loop, SystemFD sys_fd);
+  StreamSocketFD(BasicScheduler *sched, SystemFD sys_fd);
 
   friend class StreamServerFD;
 };
@@ -25,7 +25,7 @@ public:
   StreamServerFD(StreamServerFD &&other) noexcept;
   StreamServerFD &operator=(StreamServerFD &&other) noexcept = default;
 
-  StreamServerFD(BasicEventLoop &loop, const std::string &host, const std::string &service);
+  StreamServerFD(BasicScheduler *sched, const std::string &host, const std::string &service);
 
   Future<StreamSocketFD> accept();
 };

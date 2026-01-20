@@ -11,15 +11,15 @@
 
 namespace AIO {
 
-class BasicEventLoop {
+class BasicScheduler {
 public:
-  BasicEventLoop();
+  BasicScheduler();
 
-  BasicEventLoop(const BasicEventLoop &) = delete;
-  BasicEventLoop(BasicEventLoop &&other) = delete;
+  BasicScheduler(const BasicScheduler &) = delete;
+  BasicScheduler(BasicScheduler &&other) = delete;
 
-  BasicEventLoop &operator=(const BasicEventLoop &) = delete;
-  BasicEventLoop &operator=(BasicEventLoop &&other) = delete;
+  BasicScheduler &operator=(const BasicScheduler &) = delete;
+  BasicScheduler &operator=(BasicScheduler &&other) = delete;
 
   template<typename Functor, typename... Args>
   Future<std::invoke_result_t<Functor, Args...>> fiber(Functor &&fun, Args &&...args);
@@ -41,7 +41,7 @@ public:
   const StreamFD &std_out();
   const StreamFD &std_err();
 
-  ~BasicEventLoop();
+  ~BasicScheduler();
 
 private:
   using Fiber = Coroutine<void()>;
@@ -63,7 +63,7 @@ private:
 
   void resume_fiber(FiberPtr fiber);
 
-  // TODO: better interface between FD and event loop
+  // TODO: better interface between FD and scheduler
   friend class FD;
 
   template<typename Callback>
@@ -81,4 +81,4 @@ private:
 
 } // namespace AIO
 
-#include "aio_bits/event_loop.tcc"
+#include "aio_bits/scheduler.tcc"

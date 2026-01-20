@@ -6,7 +6,7 @@
 #include "util.hpp"
 
 namespace AIO {
-class BasicEventLoop;
+class BasicScheduler;
 
 template<typename Res>
 concept FutureResult = !std::is_reference_v<Res>;
