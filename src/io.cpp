@@ -35,7 +35,7 @@ IOTasksQueue::IOTasksQueue() {
   }
 }
 
-IOTasksQueue::Handle IOTasksQueue::push(SystemFD fd, TaskCallback callback) {
+IOTasksQueue::Handle IOTasksQueue::create(SystemFD fd, TaskCallback callback) {
   Handle handle(fd, *this, std::move(callback));
   epoll_event ep_evt{.events = 0, .data = {.ptr = handle.callback.get()}};
   if (epoll_ctl(ep_fd, EPOLL_CTL_ADD, fd, &ep_evt) == -1) {
@@ -75,7 +75,8 @@ IOTasksQueue::poll(std::optional<std::chrono::time_point<std::chrono::steady_clo
   epoll_event ep_evt{};
   int timeout_num = -1;
   if (deadline.has_value()) {
-    auto timeout = deadline.value() - std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    auto timeout = *deadline < now ? std::chrono::steady_clock::duration{0} : *deadline - now;
     timeout_num = std::chrono::duration_cast<std::chrono::duration<int, std::milli>>(timeout).count();
   }
   int result = epoll_wait(ep_fd, &ep_evt, 1, timeout_num);
@@ -101,7 +102,7 @@ IOTasksQueue::poll(std::optional<std::chrono::time_point<std::chrono::steady_clo
   return std::nullopt;
 }
 
-bool IOTasksQueue::is_empty() const {
+bool IOTasksQueue::empty() const {
   return size == 0;
 }
 
