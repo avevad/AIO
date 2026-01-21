@@ -12,10 +12,12 @@ set(CMAKE_CXX_FLAGS                 "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic
 set(CMAKE_ASM_CREATE_SHARED_LIBRARY ${CMAKE_CXX_CREATE_SHARED_LIBRARY})
 
 # https://github.com/google/googletest/issues/4762
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "21.0.0")
+    set(CMAKE_CXX_FLAGS            "${CMAKE_CXX_FLAGS} -Wno-error=character-conversion")
+endif ()
+
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    if(NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "21.0.0")
-        set(CMAKE_CXX_FLAGS         "${CMAKE_CXX_FLAGS} -Wno-error=assume -Wno-error=character-conversion")
-    endif()
+    set(CMAKE_CXX_FLAGS             "${CMAKE_CXX_FLAGS} -Wno-error=assume")
 endif ()
 
 include(FetchContent)
@@ -36,7 +38,6 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(AIOXX_DEBUG=1)
 endif ()
 
-# Shared library
 add_library(aio-static STATIC
         src/util.cpp
         src/context.S
@@ -48,7 +49,6 @@ add_library(aio-static STATIC
 target_include_directories(aio-static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(aio-static PROPERTIES OUTPUT_NAME aioxx)
 
-# Static library
 add_library(aio-shared SHARED
         src/util.cpp
         src/context.S
@@ -64,12 +64,16 @@ if (AIOXX_BUILD_TESTS)
     enable_testing()
     include(GoogleTest)
 
-    # Unit tests executable
-    add_executable(ut src/ut.cpp)
-    target_include_directories(ut PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(ut PRIVATE aio-static GTest::gtest_main)
+    add_executable(aio-ut
+            ut/context.cpp
+            ut/coroutine.cpp
+            ut/future.cpp
+            ut/aio.cpp
+    )
+    target_include_directories(aio-ut PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(aio-ut PRIVATE aio-static GTest::gtest_main)
 
-    gtest_discover_tests(ut)
+    gtest_discover_tests(aio-ut)
 endif ()
 
 if (AIOXX_INSTALL)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <exception>
 #include <expected>
 #include <iostream>
 #include <optional>
@@ -155,6 +156,7 @@ struct ExpectedResult {
   }
 
   static ExpectedResult make_err(std::exception_ptr err) {
+    AIOXX_ASSUME(err != nullptr);
     return {.expected = std::unexpected(std::move(err))};
   }
 
