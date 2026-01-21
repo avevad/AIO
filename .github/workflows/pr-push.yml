@@ -14,7 +14,7 @@ jobs:
     env:
       AIOXX_CC: clang-18
       AIOXX_CXX: clang++-18
-      AIOXX_DEPS: clang-18
+      AIOXX_DEPS: clang-18 libc++-18-dev
       AIOXX_BUILD: Debug
       AIOXX_FLAGS: -fsanitize=undefined,address -stdlib=libc++
     steps:
@@ -29,7 +29,7 @@ jobs:
     env:
       AIOXX_CC: clang-18
       AIOXX_CXX: clang++-18
-      AIOXX_DEPS: clang-18 llvm-18
+      AIOXX_DEPS: clang-18 llvm-18 libc++-18-dev
       AIOXX_BUILD: Debug
       AIOXX_FLAGS: -fcoverage-mapping -fprofile-instr-generate -O0 -stdlib=libc++
       AIOXX_LLVM_BIN: /usr/lib/llvm-18/bin
@@ -46,7 +46,7 @@ jobs:
     env:
       AIOXX_CC: clang-18
       AIOXX_CXX: clang++-18
-      AIOXX_DEPS: clang-18
+      AIOXX_DEPS: clang-18 libc++-18-dev
       AIOXX_BUILD: RelWithDebInfo
       AIOXX_FLAGS: -stdlib=libc++
     steps:
