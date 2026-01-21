@@ -16,7 +16,7 @@ jobs:
       AIOXX_CXX: clang++-18
       AIOXX_DEPS: clang-18
       AIOXX_BUILD: Debug
-      AIOXX_FLAGS: -fsanitize=undefined,address
+      AIOXX_FLAGS: -fsanitize=undefined,address -stdlib=libc++
     steps:
       - uses: actions/checkout@v4
       - run: ci/pipeline install-deps
@@ -31,7 +31,7 @@ jobs:
       AIOXX_CXX: clang++-18
       AIOXX_DEPS: clang-18 llvm-18
       AIOXX_BUILD: Debug
-      AIOXX_FLAGS: -fcoverage-mapping -fprofile-instr-generate -O0
+      AIOXX_FLAGS: -fcoverage-mapping -fprofile-instr-generate -O0 -stdlib=libc++
       AIOXX_LLVM_BIN: /usr/lib/llvm-18/bin
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
       AIOXX_CXX: clang++-18
       AIOXX_DEPS: clang-18
       AIOXX_BUILD: RelWithDebInfo
-      AIOXX_FLAGS: ""
+      AIOXX_FLAGS: -stdlib=libc++
     steps:
       - uses: actions/checkout@v4
       - run: ci/pipeline install-deps
