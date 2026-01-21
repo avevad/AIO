@@ -31,10 +31,11 @@ do-test() {
 }
 
 do-cover() {
-  llvm-profdata merge \
+  AIOXX_LLVM_BIN="${AIOXX_LLVM_BIN:-/usr/bin}"
+  "${AIOXX_LLVM_BIN}/llvm-profdata" merge \
     -sparse "$LLVM_PROFILE_FILE" \
     -o ./_build/cov.profdata
-  llvm-cov report ./_build/aio-ut \
+  "${AIOXX_LLVM_BIN}/llvm-cov" report ./_build/aio-ut \
     -instr-profile=./_build/cov.profdata \
     -show-region-summary=false \
     -ignore-filename-regex='_build/_deps/'

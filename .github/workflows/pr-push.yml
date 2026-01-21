@@ -32,6 +32,7 @@ jobs:
       AIOXX_DEPS: clang-19 llvm-18
       AIOXX_BUILD: Debug
       AIOXX_FLAGS: -fcoverage-mapping -fprofile-instr-generate -O0
+      AIOXX_LLVM_BIN: /usr/lib/llvm-18/bin
     steps:
       - uses: actions/checkout@v4
       - run: ci/pipeline install-deps
