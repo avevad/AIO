@@ -9,12 +9,12 @@ on:
 
 
 jobs:
-  ubuntu-clang-debug-san:
+  ubuntu-amd64-clang18-debug-san:
     runs-on: ubuntu-latest
     env:
-      AIOXX_CC: clang-19
-      AIOXX_CXX: clang++-19
-      AIOXX_DEPS: clang-19
+      AIOXX_CC: clang-18
+      AIOXX_CXX: clang++-18
+      AIOXX_DEPS: clang-18
       AIOXX_BUILD: Debug
       AIOXX_FLAGS: -fsanitize=undefined,address
     steps:
@@ -24,12 +24,12 @@ jobs:
       - run: ci/pipeline build
       - run: ci/pipeline test
 
-  ubuntu-clang-debug-cov:
+  ubuntu-amd64-clang18-debug-cov:
     runs-on: ubuntu-latest
     env:
-      AIOXX_CC: clang-19
-      AIOXX_CXX: clang++-19
-      AIOXX_DEPS: clang-19 llvm-18
+      AIOXX_CC: clang-18
+      AIOXX_CXX: clang++-18
+      AIOXX_DEPS: clang-18 llvm-18
       AIOXX_BUILD: Debug
       AIOXX_FLAGS: -fcoverage-mapping -fprofile-instr-generate -O0
       AIOXX_LLVM_BIN: /usr/lib/llvm-18/bin
@@ -41,12 +41,12 @@ jobs:
       - run: ci/pipeline test
       - run: ci/pipeline cover
 
-  ubuntu-clang-relwithdebinfo:
+  ubuntu-amd64-clang18-relwithdebinfo:
     runs-on: ubuntu-latest
     env:
-      AIOXX_CC: clang-19
-      AIOXX_CXX: clang++-19
-      AIOXX_DEPS: clang-19
+      AIOXX_CC: clang-18
+      AIOXX_CXX: clang++-18
+      AIOXX_DEPS: clang-18
       AIOXX_BUILD: RelWithDebInfo
       AIOXX_FLAGS: ""
     steps:
