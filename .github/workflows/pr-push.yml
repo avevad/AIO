@@ -9,14 +9,14 @@ on:
 
 
 jobs:
-  ubuntu-amd64-clang18-debug-san:
+  ubuntu-amd64-clang20-debug-san:
     runs-on: ubuntu-latest
     env:
-      AIOXX_CC: clang-18
-      AIOXX_CXX: clang++-18
-      AIOXX_DEPS: clang-18 libc++-18-dev
+      AIOXX_CC: clang-20
+      AIOXX_CXX: clang++-20
+      AIOXX_DEPS: clang-20
       AIOXX_BUILD: Debug
-      AIOXX_FLAGS: -fsanitize=undefined,address -stdlib=libc++
+      AIOXX_FLAGS: -fsanitize=undefined,address
     steps:
       - uses: actions/checkout@v4
       - run: ci/pipeline install-deps
@@ -24,15 +24,15 @@ jobs:
       - run: ci/pipeline build
       - run: ci/pipeline test
 
-  ubuntu-amd64-clang18-debug-cov:
+  ubuntu-amd64-clang20-debug-cov:
     runs-on: ubuntu-latest
     env:
-      AIOXX_CC: clang-18
-      AIOXX_CXX: clang++-18
-      AIOXX_DEPS: clang-18 llvm-18 libc++-18-dev
+      AIOXX_CC: clang-20
+      AIOXX_CXX: clang++-20
+      AIOXX_DEPS: clang-20 llvm-20 libc++-20-dev
       AIOXX_BUILD: Debug
-      AIOXX_FLAGS: -fcoverage-mapping -fprofile-instr-generate -O0 -stdlib=libc++
-      AIOXX_LLVM_BIN: /usr/lib/llvm-18/bin
+      AIOXX_FLAGS: -fcoverage-mapping -fprofile-instr-generate -O0
+      AIOXX_LLVM_BIN: /usr/lib/llvm-20/bin
     steps:
       - uses: actions/checkout@v4
       - run: ci/pipeline install-deps
@@ -41,14 +41,14 @@ jobs:
       - run: ci/pipeline test
       - run: ci/pipeline cover
 
-  ubuntu-amd64-clang18-relwithdebinfo:
+  ubuntu-amd64-clang20-relwithdebinfo:
     runs-on: ubuntu-latest
     env:
-      AIOXX_CC: clang-18
-      AIOXX_CXX: clang++-18
-      AIOXX_DEPS: clang-18 libc++-18-dev
+      AIOXX_CC: clang-20
+      AIOXX_CXX: clang++-20
+      AIOXX_DEPS: clang-20 libc++-20-dev
       AIOXX_BUILD: RelWithDebInfo
-      AIOXX_FLAGS: -stdlib=libc++
+      AIOXX_FLAGS: ""
     steps:
       - uses: actions/checkout@v4
       - run: ci/pipeline install-deps
