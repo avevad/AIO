@@ -4,48 +4,55 @@
 #include <functional>
 #include <list>
 
+#include "future.hpp"
+
 namespace AIO {
 using SystemFD = int;
 
-class IOTasksQueue {
+class IOQueue {
 public:
-  enum EventType : uint8_t { IN = 1, OUT = 2, ERR = 4, HUP = 8 };
-  using EventTypes = uint8_t;
   using Task = std::move_only_function<void()>;
-  using TaskCallback = std::move_only_function<void(EventTypes)>;
 
   class [[nodiscard]] Handle {
   public:
+    Handle(SystemFD fd);
     Handle(Handle &&other) noexcept;
+    Handle &operator=(Handle &&other) noexcept;
 
-    void update(EventTypes event_types);
+    Handle(const Handle &) = delete;
+    Handle& operator=(const Handle &) = delete;
+
+    Future<void> ready_in();
+    Future<void> ready_out();
 
     ~Handle();
 
   private:
-    friend IOTasksQueue;
-
-    Handle(SystemFD fd, IOTasksQueue &queue, TaskCallback callback);
+    friend IOQueue;
 
     SystemFD fd;
-    IOTasksQueue &queue;
-    std::unique_ptr<TaskCallback> callback;
+    IOQueue *queue = nullptr;
+
+    // TODO: thread-safety.
+    std::optional<Promise<void>> in = std::nullopt, out = std::nullopt;
   };
 
-  IOTasksQueue();
+  IOQueue();
+  IOQueue(const IOQueue &) = delete;
+  IOQueue(IOQueue &&) noexcept = delete;
+  IOQueue &operator=(const IOQueue &) = delete;
+  IOQueue &operator=(IOQueue &&) noexcept = delete;
 
-  Handle create(SystemFD fd, TaskCallback callback);
-  void update(Handle &handle, EventTypes event_types);
-  void erase(Handle &&handle);
+  void add(Handle *handle);
+  void erase(Handle *handle);
   [[nodiscard]] std::optional<Task> poll(std::optional<std::chrono::time_point<std::chrono::steady_clock>> deadline);
 
   [[nodiscard]] bool empty() const;
 
-  ~IOTasksQueue();
+  ~IOQueue();
 
 private:
   int ep_fd;
   size_t size = 0;
 };
-
 } // namespace AIO

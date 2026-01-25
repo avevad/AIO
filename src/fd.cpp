@@ -3,35 +3,18 @@
 #include <cstring>
 #include <fcntl.h>
 
+#include "AIOxx/io.hpp"
 #include "AIOxx/scheduler.hpp"
 
 namespace AIO {
-
-SystemFD FD::release_to_system() && {
-  auto fd_tmp = fd;
-  fd = -1;
-  return fd_tmp;
-}
-
-FD::~FD() {
-  if (fd != -1) {
-    close(fd);
-  }
-}
-
-SystemFD FD::sys_fd() const {
-  return fd;
-}
-
-BasicScheduler *FD::scheduler() const {
-  return state->sched;
-}
 
 FD::FD(FD &&other) noexcept : fd(other.fd), state(std::move(other.state)) {
   other.fd = -1;
 }
 
 FD &FD::operator=(FD &&other) noexcept {
+  AIOXX_ASSUME(fd == -1);
+
   state = std::move(other.state);
   fd = other.fd;
 
@@ -41,38 +24,59 @@ FD &FD::operator=(FD &&other) noexcept {
 }
 
 Future<void> FD::ready(Direction direction) const {
-  auto &promise_slot = direction == IN ? state->in_promise : state->out_promise;
-  AIOXX_ASSUME(!promise_slot.has_value());
-  auto [promise, future] = Contract<void>();
-  promise_slot = std::move(promise);
-  state->io_handle.value().update(
-    (state->in_promise.has_value() ? IOTasksQueue::IN : 0) | (state->out_promise.has_value() ? IOTasksQueue::OUT : 0)
-  );
-  return std::move(future);
-}
-
-FD::FD(BasicScheduler *sched, SystemFD sys_fd) : fd(sys_fd), state(nullptr) {
-  state = std::make_shared<State>(sched, std::nullopt);
-  state->io_handle.emplace(sched->register_system_fd(fd, [state = this->state](auto e) {
-    state->io_callback(e);
-  }));
-}
-
-void FD::State::io_callback(IOTasksQueue::EventTypes event_types) {
-  if (event_types & IOTasksQueue::IN && in_promise.has_value()) {
-    std::move(in_promise.value()).fulfill();
-    in_promise.reset();
+  switch (direction) {
+  case IN:
+    return state->handle.ready_in();
+  case OUT:
+    return state->handle.ready_out();
   }
-  if (event_types & IOTasksQueue::OUT && out_promise.has_value()) {
-    std::move(out_promise.value()).fulfill();
-    out_promise.reset();
-  }
-  io_handle.value().update(
-    (in_promise.has_value() ? IOTasksQueue::IN : 0) | (out_promise.has_value() ? IOTasksQueue::OUT : 0)
-  );
 }
 
-StreamFD StreamFD::open(BasicScheduler *sched, const std::filesystem::path &path, std::ios_base::openmode mode) {
+FD FD::steal_from_system(BasicScheduler::IO &io, SystemFD sys_fd) {
+  // Make sys_fd non-blocking.
+  int flags = ::fcntl(sys_fd, F_GETFL, 0);
+  if (flags == -1)
+    panic(strerror(errno));
+  fcntl(sys_fd, F_SETFL, flags);
+  return {io, sys_fd};
+}
+
+SystemFD FD::release_to_system() && {
+  auto fd_tmp = fd;
+  fd = -1;
+  return fd_tmp;
+}
+
+void FD::close() && {
+  AIOXX_ASSUME(fd != -1);
+
+  state->io.forget(&state->handle);
+  ::close(fd);
+  fd = -1;
+}
+
+FD::~FD() {
+  AIOXX_ASSUME(fd == -1);
+}
+
+SystemFD FD::sys_fd() const {
+  AIOXX_ASSUME(fd != -1);
+  return fd;
+}
+
+BasicScheduler *FD::scheduler() const {
+  return state->io.scheduler();
+}
+
+FD::FD(BasicScheduler::IO &io, SystemFD sys_fd) : fd(sys_fd), state(nullptr) {
+  state = std::make_unique<State>(io, IOQueue::Handle{fd});
+  state->io.watch(&state->handle);
+}
+
+StreamFD::StreamFD(FD &&other) noexcept : FD(std::move(other)) {
+}
+
+StreamFD StreamFD::open(BasicScheduler::IO &io, const std::filesystem::path &path, std::ios_base::openmode mode) {
   int flags = 0;
   if (mode & std::ios::in) {
     flags = O_RDONLY;
@@ -84,32 +88,59 @@ StreamFD StreamFD::open(BasicScheduler *sched, const std::filesystem::path &path
     flags = O_RDWR;
   }
   SystemFD sys_fd = ::open(path.c_str(), flags);
-  return {sched, sys_fd};
+  return StreamFD(steal_from_system(io, sys_fd));
 }
 
-StreamFD StreamFD::steal_from_system(BasicScheduler *sched, SystemFD sys_fd) {
-  return {sched, sys_fd};
+std::optional<StreamFD::StreamSize> StreamFD::try_read(OctetBuffer buffer) const {
+  std::ptrdiff_t res = ::read(sys_fd(), buffer.data(), buffer.size());
+
+  // ReSharper disable once CppIdenticalOperandsInBinaryExpression
+  if (res == EWOULDBLOCK || res == EAGAIN)
+    return std::nullopt;
+
+  if (res < 0)
+    throw Error(std::error_code{static_cast<int>(res), std::system_category()}, "read");
+
+  return res;
 }
 
-std::size_t StreamFD::read(size_t size, char *data) const {
-  scheduler()->await(ready(IN));
-  auto read_size = ::read(sys_fd(), data, size);
-  if (read_size < 0) {
-    throw SystemError(std::string("read: ") + strerror(errno));
+std::optional<StreamFD::StreamSize> StreamFD::try_write(OctetStream stream) const {
+  std::ptrdiff_t res = ::write(sys_fd(), stream.data(), stream.size());
+
+  // ReSharper disable once CppIdenticalOperandsInBinaryExpression
+  if (res == EWOULDBLOCK || res == EAGAIN)
+    return std::nullopt;
+
+  if (res < 0)
+    throw Error(std::error_code{static_cast<int>(res), std::system_category()}, "write");
+
+  return res;
+}
+
+StreamFD::StreamSize StreamFD::read(OctetBuffer buffer) const {
+  Future<void> guard = ready(IN);
+
+  auto res = try_read(buffer);
+  if (res.has_value()) {
+    std::move(guard).detach();
+    return *res;
   }
-  return read_size;
+
+  scheduler()->await(std::move(guard));
+  return *try_read(buffer);
 }
 
-std::size_t StreamFD::write(size_t size, const char *data) const {
-  scheduler()->await(ready(OUT));
-  auto write_size = ::write(sys_fd(), data, size);
-  if (write_size < 0) {
-    throw SystemError(std::string("write: ") + strerror(errno));
+StreamFD::StreamSize StreamFD::write(OctetStream stream) const {
+  Future<void> guard = ready(OUT);
+
+  auto res = try_write(stream);
+  if (res.has_value()) {
+    std::move(guard).detach();
+    return *res;
   }
-  return write_size;
-}
 
-StreamFD::StreamFD(BasicScheduler *sched, SystemFD sys_fd) : FD(sched, sys_fd) {
+  scheduler()->await(std::move(guard));
+  return *try_write(stream);
 }
 
 } // namespace AIO

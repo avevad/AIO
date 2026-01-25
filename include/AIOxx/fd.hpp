@@ -5,16 +5,16 @@
 
 #include <filesystem>
 
+#include "scheduler.hpp"
+
 namespace AIO {
-
-class BasicScheduler;
-
-class SystemError : public std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
 
 class FD {
 public:
+  class Error : std::system_error {
+    using std::system_error::system_error;
+  };
+
   enum Direction { IN, OUT };
 
   FD(const FD &) = delete;
@@ -25,45 +25,48 @@ public:
 
   [[nodiscard]] Future<void> ready(Direction direction) const;
 
-  [[nodiscard]] BasicScheduler *scheduler() const;
+  static FD steal_from_system(BasicScheduler::IO &io, SystemFD sys_fd);
 
   [[nodiscard]] SystemFD release_to_system() &&;
+  void close() &&;
+
   ~FD();
 
 protected:
   [[nodiscard]] SystemFD sys_fd() const;
-
-  FD(BasicScheduler *sched, SystemFD sys_fd);
+  [[nodiscard]] BasicScheduler *scheduler() const;
 
 private:
   struct State {
-    BasicScheduler *sched;
-    std::optional<IOTasksQueue::Handle> io_handle;
-    std::optional<Promise<void>> in_promise = std::nullopt;
-    std::optional<Promise<void>> out_promise = std::nullopt;
-
-    void io_callback(IOTasksQueue::EventTypes event_types);
+    BasicScheduler::IO &io;
+    IOQueue::Handle handle;
   };
 
+  FD(BasicScheduler::IO &io, SystemFD sys_fd);
+
   SystemFD fd;
-  std::shared_ptr<State> state; // TODO: remove this temporary fix for use-after-free
-  // If we use unique_ptr here, we will have to store raw .get() in IO callback,
-  // which can already be expired at the moment the callback is executed.
+  std::unique_ptr<State> state;
 };
 
 class StreamFD : public FD {
 public:
-  static StreamFD open(BasicScheduler *sched, const std::filesystem::path &path, std::ios_base::openmode mode);
-  static StreamFD steal_from_system(BasicScheduler *sched, SystemFD sys_fd);
+  using Octet = uint8_t;
+  using OctetStream = std::span<const Octet>;
+  using OctetBuffer = std::span<Octet>;
+  using StreamSize = std::ptrdiff_t;
+
+  explicit StreamFD(FD &&other) noexcept;
+
+  static StreamFD open(BasicScheduler::IO &io, const std::filesystem::path &path, std::ios_base::openmode mode);
 
   StreamFD(StreamFD &&other) noexcept = default;
   StreamFD &operator=(StreamFD &&other) noexcept = default;
 
-  std::size_t read(size_t size, char *data) const;
-  std::size_t write(size_t size, const char *data) const;
+  [[nodiscard]] std::optional<StreamSize> try_read(OctetBuffer buffer) const;
+  [[nodiscard]] std::optional<StreamSize> try_write(OctetStream stream) const;
 
-protected:
-  StreamFD(BasicScheduler *sched, SystemFD sys_fd);
+  [[nodiscard]] StreamSize read(OctetBuffer buffer) const;
+  [[nodiscard]] StreamSize write(OctetStream stream) const;
 };
 
 } // namespace AIO
