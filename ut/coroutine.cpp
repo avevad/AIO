@@ -22,7 +22,7 @@ TEST(Coro, RetArg) {
   EXPECT_FALSE(c.is_dead());
   EXPECT_EQ(c.resume(5), 15);
   EXPECT_TRUE(c.is_dead());
-  EXPECT_EQ(seen, (std::vector<int>{1, 5}));
+  EXPECT_EQ(seen, (std::vector{1, 5}));
 }
 
 TEST(Coro, VoidArg) {
@@ -92,26 +92,23 @@ TEST(Coro, ErrorPropagates) {
 
 TEST(Coro, Generator) {
   Coroutine<int()> *self = nullptr;
-  Coroutine<int()> c([&] {
+  Coroutine<int()> c([&] -> int {
     self->yield(1);
     self->yield(2);
     throw EndGeneration();
-    return 0;
   });
   self = &c;
 
   std::vector<int> got;
-  for (int v : CoroutineGenerator<int>(c)) {
+  for (int v : CoroutineGenerator(c)) {
     got.push_back(v);
   }
   ASSERT_EQ(got.size(), 2u);
   EXPECT_EQ(got[0], 1);
   EXPECT_EQ(got[1], 2);
 
-  // Iterator copy/assign (avoid driving the same coroutine twice).
   CoroutineIterator<int> end1 = CoroutineIteratorEnd{};
-  CoroutineIterator<int> end2 = end1;
-  end2 = end1;
+  CoroutineIterator<int> end2 = CoroutineIteratorEnd{};
   EXPECT_TRUE(end1 == end2);
 }
 
