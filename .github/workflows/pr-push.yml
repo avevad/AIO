@@ -10,6 +10,7 @@ on:
 
 jobs:
   ubuntu-amd64-clang20-debug-san:
+    name: Build with Sanitizers (Ubuntu x86_64 Clang20)
     runs-on: ubuntu-latest
     env:
       AIOXX_CC: clang-20
@@ -25,6 +26,7 @@ jobs:
       - run: ci/pipeline test
 
   ubuntu-amd64-clang20-debug-cov:
+    name: Build with Coverage (Ubuntu x86_64 Clang20)
     runs-on: ubuntu-latest
     env:
       AIOXX_CC: clang-20
@@ -42,6 +44,7 @@ jobs:
       - run: ci/pipeline cover
 
   ubuntu-amd64-clang20-relwithdebinfo:
+    name: Build Release with Debug (Ubuntu x86_64 Clang20)
     runs-on: ubuntu-latest
     env:
       AIOXX_CC: clang-20
