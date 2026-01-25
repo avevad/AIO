@@ -12,7 +12,7 @@ namespace AIO {
 
 namespace _impl {
 
-  static inline thread_local void *volatile current_coroutine = nullptr;
+  extern thread_local void *volatile current_coroutine;
   static inline constexpr std::size_t COROUTINE_STACK_SIZE = 16 * 1024; // 16 KiB
 
   template<typename Ret, typename Arg>
