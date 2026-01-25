@@ -24,6 +24,8 @@ FD &FD::operator=(FD &&other) noexcept {
 }
 
 Future<void> FD::ready(Direction direction) const {
+  AIOXX_ASSUME(fd != -1);
+
   switch (direction) {
   case IN:
     return state->handle.ready_in();
@@ -37,7 +39,7 @@ FD FD::steal_from_system(BasicScheduler::IO &io, SystemFD sys_fd) {
   int flags = ::fcntl(sys_fd, F_GETFL, 0);
   if (flags == -1)
     panic(strerror(errno));
-  fcntl(sys_fd, F_SETFL, flags);
+  fcntl(sys_fd, F_SETFL, flags | O_NONBLOCK);
   return {io, sys_fd};
 }
 
@@ -88,6 +90,9 @@ StreamFD StreamFD::open(BasicScheduler::IO &io, const std::filesystem::path &pat
     flags = O_RDWR;
   }
   SystemFD sys_fd = ::open(path.c_str(), flags);
+  if (sys_fd < 0) {
+    throw Error(errno, std::generic_category(), "open(`" + path.string() + "`, ...)");
+  }
   return StreamFD(steal_from_system(io, sys_fd));
 }
 
@@ -95,11 +100,11 @@ std::optional<StreamFD::StreamSize> StreamFD::try_read(OctetBuffer buffer) const
   std::ptrdiff_t res = ::read(sys_fd(), buffer.data(), buffer.size());
 
   // ReSharper disable once CppIdenticalOperandsInBinaryExpression
-  if (res == EWOULDBLOCK || res == EAGAIN)
+  if (res < 0 && (errno == EWOULDBLOCK || errno == EAGAIN))
     return std::nullopt;
 
   if (res < 0)
-    throw Error(std::error_code{static_cast<int>(res), std::system_category()}, "read");
+    throw Error(errno, std::generic_category(), "read(" + std::to_string(sys_fd()) + ", ...)");
 
   return res;
 }
@@ -108,11 +113,11 @@ std::optional<StreamFD::StreamSize> StreamFD::try_write(OctetStream stream) cons
   std::ptrdiff_t res = ::write(sys_fd(), stream.data(), stream.size());
 
   // ReSharper disable once CppIdenticalOperandsInBinaryExpression
-  if (res == EWOULDBLOCK || res == EAGAIN)
+  if (res < 0 && (errno == EWOULDBLOCK || errno == EAGAIN))
     return std::nullopt;
 
   if (res < 0)
-    throw Error(std::error_code{static_cast<int>(res), std::system_category()}, "write");
+    throw Error(errno, std::generic_category(), "write(" + std::to_string(sys_fd()) + ", ...)");
 
   return res;
 }

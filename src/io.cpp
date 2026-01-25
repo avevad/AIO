@@ -35,6 +35,18 @@ IOQueue::Handle &IOQueue::Handle::operator=(Handle &&other) noexcept {
   return *this;
 }
 
+Future<void> IOQueue::Handle::ready_in() {
+  auto [promise, future] = Contract<void>();
+  in = std::move(promise);
+  return std::move(future);
+}
+
+Future<void> IOQueue::Handle::ready_out() {
+  auto [promise, future] = Contract<void>();
+  out = std::move(promise);
+  return std::move(future);
+}
+
 IOQueue::Handle::~Handle() {
   AIOXX_ASSUME(queue == nullptr);
 }
@@ -47,7 +59,7 @@ IOQueue::IOQueue() {
 void IOQueue::add(Handle *handle) {
   size++;
   handle->queue = this;
-  epoll_event ep_evt{.events = static_cast<uint32_t>(EPOLLIN | EPOLLOUT) | EPOLLET, .data = {.ptr = &handle}};
+  epoll_event ep_evt{.events = static_cast<uint32_t>(EPOLLIN | EPOLLOUT) | EPOLLET, .data = {.ptr = handle}};
   if (epoll_ctl(ep_fd, EPOLL_CTL_ADD, handle->fd, &ep_evt) == -1)
     panic(strerror(errno));
 }

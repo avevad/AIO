@@ -145,7 +145,7 @@ auto BasicScheduler::async(Functor &&fun) {
 }
 
 template<typename Res>
-Res BasicScheduler::await(Future<Res> future) {
+[[nodiscard]] Res BasicScheduler::await(Future<Res> future) {
   AIOXX_ASSUME(current_fiber != nullptr);
 
   // See comments below.

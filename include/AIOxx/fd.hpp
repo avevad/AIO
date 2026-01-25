@@ -11,7 +11,7 @@ namespace AIO {
 
 class FD {
 public:
-  class Error : std::system_error {
+  class Error : public std::system_error {
     using std::system_error::system_error;
   };
 
