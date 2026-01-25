@@ -44,15 +44,22 @@ FD FD::steal_from_system(BasicScheduler::IO &io, SystemFD sys_fd) {
 }
 
 SystemFD FD::release_to_system() && {
-  auto fd_tmp = fd;
+  AIOXX_ASSUME(fd != -1);
+
+  auto sys_fd = fd;
+  state->io.forget(&state->handle);
+  state.reset();
+
   fd = -1;
-  return fd_tmp;
+  return sys_fd;
 }
 
 void FD::close() && {
   AIOXX_ASSUME(fd != -1);
 
   state->io.forget(&state->handle);
+  state.reset();
+
   ::close(fd);
   fd = -1;
 }
