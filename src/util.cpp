@@ -9,7 +9,7 @@ std::string make_exception_message(const std::string &what, std::exception_ptr e
     std::rethrow_exception(std::move(err));
   } catch (std::exception &e) {
     int flag = 0;
-    char *e_name_c = abi::__cxa_demangle(typeid(err).name(), nullptr, nullptr, &flag);
+    char *e_name_c = abi::__cxa_demangle(typeid(e).name(), nullptr, nullptr, &flag);
     const std::string e_name = e_name_c;
     std::free(e_name_c);
     return what + ": " + e_name + ": " + e.what();

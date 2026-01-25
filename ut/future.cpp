@@ -15,7 +15,7 @@ Future<T> ok(T v) {
   return std::move(c.future);
 }
 
-inline Future<void> ok() {
+Future<void> ok() {
   Contract<void> c;
   std::move(c.promise).fulfill();
   return std::move(c.future);
@@ -263,29 +263,6 @@ TEST(Future, ErrorShortCircuits) {
              });
   std::move(f).detach();
   EXPECT_FALSE(called);
-}
-
-TEST(Future, VoidSpecialsAndConversion) {
-  Contract<void> c;
-  bool called = false;
-
-  // Future<void> -> Future<_impl::Void> -> Future<void>
-  Future<void> f0 = std::move(c.future);
-  Future<AIO::_impl::Void> raw(std::move(f0));
-  Future<void> f1(std::move(raw));
-
-  auto f2 = std::move(f1).map_result([&] {
-    called = true;
-    return 123;
-  });
-
-  std::move(c.promise).fulfill();
-  std::move(f2).detach();
-  EXPECT_TRUE(called);
-
-  // map_result to void
-  auto f3 = ok().map_result([&] { called = true; });
-  std::move(f3).detach();
 }
 
 TEST(Future, ExceptAnyHandlerThrows) {

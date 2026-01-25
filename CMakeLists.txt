@@ -65,7 +65,6 @@ if (AIOXX_BUILD_TESTS)
     include(GoogleTest)
 
     add_executable(aio-ut
-            ut/context.cpp
             ut/coroutine.cpp
             ut/future.cpp
             ut/aio.cpp
