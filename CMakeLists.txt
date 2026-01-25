@@ -44,7 +44,7 @@ add_library(aio-static STATIC
         src/context.cpp
         src/io.cpp
         src/fd.cpp
-        src/net.cpp
+        src/scheduler.cpp
 )
 target_include_directories(aio-static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(aio-static PROPERTIES OUTPUT_NAME aioxx)
@@ -55,7 +55,7 @@ add_library(aio-shared SHARED
         src/context.cpp
         src/io.cpp
         src/fd.cpp
-        src/net.cpp
+        src/scheduler.cpp
 )
 target_include_directories(aio-shared PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(aio-shared PROPERTIES OUTPUT_NAME aioxx)
