@@ -63,7 +63,8 @@ struct Pipe {
 
 Pipe make_pipe() {
   int fds[2] = {-1, -1};
-  AIOXX_ASSUME(::pipe(fds) == 0);
+  int res = ::pipe(fds);
+  AIOXX_ASSUME(res == 0);
   return {.r = RawFD(fds[0]), .w = RawFD(fds[1])};
 }
 
