@@ -130,28 +130,18 @@ std::optional<StreamFD::StreamSize> StreamFD::try_write(OctetStream stream) cons
 }
 
 StreamFD::StreamSize StreamFD::read(OctetBuffer buffer) const {
-  Future<void> guard = ready(IN);
-
   auto res = try_read(buffer);
-  if (res.has_value()) {
-    std::move(guard).detach();
+  if (res.has_value())
     return *res;
-  }
-
-  scheduler()->await(std::move(guard));
+  scheduler()->await(ready(IN));
   return *try_read(buffer);
 }
 
 StreamFD::StreamSize StreamFD::write(OctetStream stream) const {
-  Future<void> guard = ready(OUT);
-
   auto res = try_write(stream);
-  if (res.has_value()) {
-    std::move(guard).detach();
+  if (res.has_value())
     return *res;
-  }
-
-  scheduler()->await(std::move(guard));
+  scheduler()->await(ready(OUT));
   return *try_write(stream);
 }
 

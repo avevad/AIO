@@ -13,7 +13,8 @@ IOQueue::Handle::Handle(SystemFD fd) : fd(fd) {
 }
 
 IOQueue::Handle::Handle(Handle &&other) noexcept
-    : fd(other.fd), queue(other.queue), in(std::move(other.in)), out(std::move(other.out)) {
+    : fd(other.fd), queue(other.queue), prom_in(std::move(other.prom_in)), prom_out(std::move(other.prom_out)),
+      fut_in(std::move(other.fut_in)), fut_out(std::move(other.fut_out)) {
   AIOXX_ASSUME(other.queue == nullptr);
 
   other.fd = -1;
@@ -26,8 +27,10 @@ IOQueue::Handle &IOQueue::Handle::operator=(Handle &&other) noexcept {
 
   fd = other.fd;
   queue = other.queue;
-  in = std::move(other.in);
-  out = std::move(other.out);
+  prom_in = std::move(other.prom_in);
+  prom_out = std::move(other.prom_out);
+  fut_in = std::move(other.fut_in);
+  fut_out = std::move(other.fut_out);
 
   other.fd = -1;
   other.queue = nullptr;
@@ -36,19 +39,33 @@ IOQueue::Handle &IOQueue::Handle::operator=(Handle &&other) noexcept {
 }
 
 Future<void> IOQueue::Handle::ready_in() {
-  auto [promise, future] = Contract<void>();
-  in = std::move(promise);
-  return std::move(future);
+  if (!fut_in.has_value()) {
+    auto [promise, future] = Contract<void>();
+    prom_in = std::move(promise);
+    fut_in = std::move(future);
+  }
+  auto future = std::move(*fut_in);
+  fut_in.reset();
+  return future;
 }
 
 Future<void> IOQueue::Handle::ready_out() {
-  auto [promise, future] = Contract<void>();
-  out = std::move(promise);
-  return std::move(future);
+  if (!fut_out.has_value()) {
+    auto [promise, future] = Contract<void>();
+    prom_out = std::move(promise);
+    fut_out = std::move(future);
+  }
+  auto future = std::move(*fut_out);
+  fut_out.reset();
+  return future;
 }
 
 IOQueue::Handle::~Handle() {
   AIOXX_ASSUME(queue == nullptr);
+  if (fut_in.has_value())
+    std::move(*fut_in).detach();
+  if (fut_out.has_value())
+    std::move(*fut_out).detach();
 }
 
 IOQueue::IOQueue() {
@@ -86,10 +103,26 @@ std::optional<IOQueue::Task> IOQueue::poll(std::optional<std::chrono::time_point
     auto handle = static_cast<Handle *>(ep_evt.data.ptr);
     std::optional<Promise<void>> in = std::nullopt, out = std::nullopt;
     if (ep_evt.events & (EPOLLIN | EPOLLERR | EPOLLHUP)) {
-      in = std::move(handle->in);
+      if (!handle->fut_in.has_value()) {
+        if (!handle->prom_in.has_value()) {
+          auto [promise, future] = Contract<void>();
+          handle->prom_in = std::move(promise);
+          handle->fut_in = std::move(future);
+        }
+        in = std::move(handle->prom_in);
+        handle->prom_in.reset();
+      }
     }
     if (ep_evt.events & (EPOLLOUT | EPOLLERR | EPOLLHUP)) {
-      out = std::move(handle->out);
+      if (!handle->fut_out.has_value()) {
+        if (!handle->prom_out.has_value()) {
+          auto [promise, future] = Contract<void>();
+          handle->prom_out = std::move(promise);
+          handle->fut_out = std::move(future);
+        }
+        out = std::move(handle->prom_out);
+        handle->prom_out.reset();
+      }
     }
     return [in = std::move(in), out = std::move(out)] mutable {
       if (in.has_value())

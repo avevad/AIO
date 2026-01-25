@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <functional>
-#include <list>
 
 #include "future.hpp"
 
@@ -34,7 +33,8 @@ public:
     IOQueue *queue = nullptr;
 
     // TODO: thread-safety.
-    std::optional<Promise<void>> in = std::nullopt, out = std::nullopt;
+    std::optional<Promise<void>> prom_in = std::nullopt, prom_out = std::nullopt;
+    std::optional<Future<void>> fut_in = std::nullopt, fut_out = std::nullopt;
   };
 
   IOQueue();
