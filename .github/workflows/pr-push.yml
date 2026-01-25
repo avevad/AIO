@@ -1,0 +1,60 @@
+name: 'PR & Push'
+
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+
+jobs:
+  ubuntu-amd64-clang20-debug-san:
+    name: Build with Sanitizers (Ubuntu x86_64 Clang20)
+    runs-on: ubuntu-latest
+    env:
+      AIOXX_CC: clang-20
+      AIOXX_CXX: clang++-20
+      AIOXX_DEPS: clang-20
+      AIOXX_BUILD: Debug
+      AIOXX_FLAGS: -fsanitize=undefined,address
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/pipeline install-deps
+      - run: ci/pipeline configure
+      - run: ci/pipeline build
+      - run: ci/pipeline test
+
+  ubuntu-amd64-clang20-debug-cov:
+    name: Build with Coverage (Ubuntu x86_64 Clang20)
+    runs-on: ubuntu-latest
+    env:
+      AIOXX_CC: clang-20
+      AIOXX_CXX: clang++-20
+      AIOXX_DEPS: clang-20 llvm-20 libc++-20-dev
+      AIOXX_BUILD: Debug
+      AIOXX_FLAGS: -fcoverage-mapping -fprofile-instr-generate -O0
+      AIOXX_LLVM_BIN: /usr/lib/llvm-20/bin
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/pipeline install-deps
+      - run: ci/pipeline configure
+      - run: ci/pipeline build
+      - run: ci/pipeline test
+      - run: ci/pipeline cover
+
+  ubuntu-amd64-clang20-relwithdebinfo:
+    name: Build Release with Debug (Ubuntu x86_64 Clang20)
+    runs-on: ubuntu-latest
+    env:
+      AIOXX_CC: clang-20
+      AIOXX_CXX: clang++-20
+      AIOXX_DEPS: clang-20 libc++-20-dev
+      AIOXX_BUILD: RelWithDebInfo
+      AIOXX_FLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/pipeline install-deps
+      - run: ci/pipeline configure
+      - run: ci/pipeline build
+      - run: ci/pipeline test
