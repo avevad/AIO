@@ -38,7 +38,8 @@ do-cover() {
   "${AIOXX_LLVM_BIN}/llvm-cov" report ./_build/aio-ut \
     -instr-profile=./_build/cov.profdata \
     -show-region-summary=false \
-    -ignore-filename-regex='_build/_deps/'
+    -ignore-filename-regex='_build/_deps/' \
+    -ignore-filename-regex='ut/'
 }
 
 do-"$1" ${@:2}
