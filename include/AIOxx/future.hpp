@@ -69,6 +69,7 @@ namespace _impl {
     template<typename Consumer1>
     void consume_with(Consumer1 &&consumer) &&;
 
+    bool consumed = false;
     std::optional<ExpectedResult> maybe_result = std::nullopt;
     std::optional<HangupHandler> maybe_handler = std::nullopt;
   };
@@ -116,6 +117,7 @@ namespace _impl {
 
     void set(ExpectedResult result) &&;
 
+    bool fulfilled = false;
     std::optional<Consumer> maybe_consumer = std::nullopt;
     bool hangup = false;
   };
@@ -248,8 +250,9 @@ namespace AIO {
 namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise>::FutureBase(FutureBase &&other) noexcept
-      : Bond(std::move(other)), maybe_result(std::move(other.maybe_result)),
+      : Bond(std::move(other)), consumed(other.consumed), maybe_result(std::move(other.maybe_result)),
         maybe_handler(std::move(other.maybe_handler)) {
+    other.consumed = false;
     other.maybe_result.reset();
     other.maybe_handler.reset();
   }
@@ -259,8 +262,11 @@ namespace _impl {
     AIOXX_ASSUME(is_free());
 
     Bond::operator=(std::move(other));
+    consumed = other.consumed;
     maybe_result = std::move(other.maybe_result);
     maybe_handler = std::move(other.maybe_handler);
+
+    other.consumed = false;
     other.maybe_result.reset();
     other.maybe_handler.reset();
 
@@ -271,16 +277,17 @@ namespace _impl {
   template<typename P>
   void FutureBase<Res, Future, Promise>::bind_to(P &promise) {
     Bond::initialize(promise);
+    promise.set_hangup_handler([] {});
   }
   template<FutureResult Res, typename Future, typename Promise>
   bool FutureBase<Res, Future, Promise>::is_free() const {
     if (!Bond::is_initialized())
       return true;
 
-    if (!Bond::is_alive())
-      return !maybe_result.has_value();
+    if (!maybe_handler.has_value())
+      return true;
 
-    return Bond::get().maybe_consumer.has_value();
+    return consumed;
   }
 
   template<FutureResult Res, typename Future, typename Promise>
@@ -406,20 +413,19 @@ namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   void FutureBase<Res, Future, Promise>::cancel() && {
     AIOXX_ASSUME(Bond::is_initialized());
+    AIOXX_ASSUME(maybe_handler.has_value());
 
-    if (maybe_handler.has_value()) {
-      auto handler = std::move(*maybe_handler);
+    if (!consumed) {
+      (*maybe_handler)();
       maybe_handler.reset();
-      std::move(*this).consume_with([](ExpectedResult) {});
-      handler();
-      return;
     }
 
     if (Bond::is_alive()) {
       Bond::get().hangup = true;
+      Bond::get().maybe_consumer.reset();
     }
 
-    std::move(*this).consume_with([](ExpectedResult) {});
+    auto _ = std::move(*this);
   }
 
   template<FutureResult Res, typename Future, typename Promise>
@@ -441,20 +447,25 @@ namespace _impl {
   template<typename Consumer1>
   void FutureBase<Res, Future, Promise>::consume_with(Consumer1 &&consumer) && {
     AIOXX_ASSUME(Bond::is_initialized());
+    AIOXX_ASSUME(!consumed);
 
+    if (!maybe_handler.has_value())
+      return;
+
+    consumed = true;
     if (maybe_result.has_value()) {
       consumer(std::move(*maybe_result));
       maybe_result.reset();
-    } else if (Bond::is_alive()) {
+    } else if (Bond::is_alive())
       Bond::get().maybe_consumer = std::forward<Consumer1>(consumer);
-    }
 
     auto _ = std::move(*this);
   }
 
   template<FutureResult Res, typename Promise, typename Future>
   PromiseBase<Res, Promise, Future>::PromiseBase(PromiseBase &&other) noexcept
-      : Bond(std::move(other)), maybe_consumer(std::move(other.maybe_consumer)), hangup(other.hangup) {
+      : Bond(std::move(other)), fulfilled(other.fulfilled), maybe_consumer(std::move(other.maybe_consumer)), hangup(other.hangup) {
+    other.fulfilled = false;
     other.maybe_consumer.reset();
     other.hangup = false;
   }
@@ -464,8 +475,11 @@ namespace _impl {
     AIOXX_ASSUME(is_free());
 
     Bond::operator=(std::move(other));
+    fulfilled = other.fulfilled;
     maybe_consumer = std::move(other.maybe_consumer);
     hangup = other.hangup;
+
+    other.fulfilled = false;
     other.maybe_consumer.reset();
     other.hangup = false;
 
@@ -476,6 +490,7 @@ namespace _impl {
   template<typename F>
   void PromiseBase<Res, Promise, Future>::bind_to(F &future) {
     Bond::initialize(future);
+    set_hangup_handler([] {});
   }
 
   template<FutureResult Res, typename Promise, typename Future>
@@ -483,10 +498,10 @@ namespace _impl {
     if (!Bond::is_initialized())
       return true;
 
-    if (!Bond::is_alive())
-      return !maybe_consumer.has_value();
+    if (hangup)
+      return true;
 
-    return Bond::get().maybe_result.has_value();
+    return fulfilled;
   }
 
   template<FutureResult Res, typename Promise, typename Future>
@@ -499,12 +514,10 @@ namespace _impl {
   void PromiseBase<Res, Promise, Future>::set_hangup_handler(F1 &&handler) {
     AIOXX_ASSUME(Bond::is_initialized());
 
-    HangupHandler hangup_handler = std::forward<F1>(handler);
     if (hangup) {
-      hangup = false;
-      hangup_handler();
+      handler();
     } else if (Bond::is_alive()) {
-      Bond::get().maybe_handler = std::move(hangup_handler);
+      Bond::get().maybe_handler = std::forward<F1>(handler);
     }
   }
 
@@ -527,13 +540,17 @@ namespace _impl {
   template<FutureResult Res, typename Promise, typename Future>
   void PromiseBase<Res, Promise, Future>::set(ExpectedResult result) && {
     AIOXX_ASSUME(Bond::is_initialized());
+    AIOXX_ASSUME(!fulfilled);
 
+    if (hangup)
+      return;
+
+    fulfilled = true;
     if (maybe_consumer.has_value()) {
       (*maybe_consumer)(std::move(result));
       maybe_consumer.reset();
-    } else {
+    } else if (Bond::is_alive())
       Bond::get().maybe_result.emplace(std::move(result));
-    }
 
     auto _ = std::move(*this);
   }
