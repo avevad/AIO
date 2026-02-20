@@ -17,14 +17,6 @@ template<FutureResult Res>
 class Future;
 
 namespace _impl {
-  template<FutureResult Res>
-  class Consumer {
-  public:
-    virtual void set_cancellation_handle(Future<Res> future) = 0;
-    virtual void consume(ExpectedResult<Res> result) = 0;
-    virtual ~Consumer() = default;
-  };
-
   template<FutureResult Res, typename Promise, typename Future>
   class PromiseBase;
 
@@ -36,6 +28,13 @@ namespace _impl {
     FutureBase() = default;
     FutureBase(FutureBase &&other) noexcept;
     FutureBase &operator=(FutureBase &&other) noexcept;
+
+    class Consumer {
+    public:
+      virtual void set_cancellation_handle(Future future) = 0;
+      virtual void consume(ExpectedResult<Res> result) = 0;
+      virtual ~Consumer() = default;
+    };
 
     FutureBase(const FutureBase &) = delete;
     FutureBase &operator=(const FutureBase &) = delete;
@@ -51,7 +50,7 @@ namespace _impl {
     using Result = Res;
     using ExpectedResult = ExpectedResult<Res>;
     using HangupHandler = std::move_only_function<void()>;
-    using ConsumerPtr = std::unique_ptr<Consumer<Res>>;
+    using ConsumerPtr = std::unique_ptr<Consumer>;
 
     template<typename AsyncFunctor, typename Res1 = std::invoke_result_t<AsyncFunctor, Res>::Result>
     auto then(AsyncFunctor &&functor) &&;
@@ -108,7 +107,8 @@ namespace _impl {
     using Result = Res;
     using ExpectedResult = ExpectedResult<Res>;
     using HangupHandler = std::move_only_function<void()>;
-    using ConsumerPtr = std::unique_ptr<Consumer<Res>>;
+    using ConsumerBase = typename FutureBase<Res, Future, Promise>::Consumer;
+    using ConsumerPtr = std::unique_ptr<ConsumerBase>;
 
     template<typename F1>
     void set_hangup_handler(F1 &&handler);
@@ -313,7 +313,7 @@ namespace _impl {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     using MappedPromise = AIO::Promise<Res1>;
 
-    class ThenConsumer final : public Consumer<Res> {
+    class ThenConsumer final : public Consumer {
     public:
       ThenConsumer(MappedPromise promise, std::decay_t<AsyncFunctor> fun) : promise(std::move(promise)), fun(std::move(fun)) {
       }
@@ -323,7 +323,9 @@ namespace _impl {
       }
 
       void consume(ExpectedResult result) override {
-        class NestedConsumer final : public Consumer<Res1> {
+        using MappedConsumerBase = typename FutureBase<Res1, MappedFuture, MappedPromise>::Consumer;
+
+        class NestedConsumer final : public MappedConsumerBase {
         public:
           explicit NestedConsumer(MappedPromise promise) : promise(std::move(promise)) {
           }
@@ -365,7 +367,7 @@ namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   template<typename Exception, typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except(AsyncHandler &&handler) && {
-    class ExceptConsumer final : public Consumer<Res> {
+    class ExceptConsumer final : public Consumer {
     public:
       ExceptConsumer(Promise promise, std::decay_t<AsyncHandler> handler)
           : promise(std::move(promise)), handler(std::move(handler)) {
@@ -376,7 +378,7 @@ namespace _impl {
       }
 
       void consume(ExpectedResult result) override {
-        class NestedConsumer final : public Consumer<Res> {
+        class NestedConsumer final : public Consumer {
         public:
           explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {
           }
@@ -424,7 +426,7 @@ namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   template<typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except_any(AsyncHandler &&handler) && {
-    class ExceptAnyConsumer final : public Consumer<Res> {
+    class ExceptAnyConsumer final : public Consumer {
     public:
       ExceptAnyConsumer(Promise promise, std::decay_t<AsyncHandler> handler)
           : promise(std::move(promise)), handler(std::move(handler)) {
@@ -435,7 +437,7 @@ namespace _impl {
       }
 
       void consume(ExpectedResult result) override {
-        class NestedConsumer final : public Consumer<Res> {
+        class NestedConsumer final : public Consumer {
         public:
           explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {
           }
@@ -486,7 +488,7 @@ namespace _impl {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     using MappedPromise = AIO::Promise<Res1>;
 
-    class MapResultConsumer final : public Consumer<Res> {
+    class MapResultConsumer final : public Consumer {
     public:
       MapResultConsumer(MappedPromise promise, std::decay_t<Functor> functor)
           : promise(std::move(promise)), functor(std::move(functor)) {
@@ -526,7 +528,7 @@ namespace _impl {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     using MappedPromise = AIO::Promise<Res1>;
 
-    class MapExpectedConsumer final : public Consumer<Res> {
+    class MapExpectedConsumer final : public Consumer {
     public:
       MapExpectedConsumer(MappedPromise promise, std::decay_t<Functor> functor)
           : promise(std::move(promise)), functor(std::move(functor)) {
@@ -577,7 +579,7 @@ namespace _impl {
 
   template<FutureResult Res, typename Future, typename Promise>
   void FutureBase<Res, Future, Promise>::detach() && {
-    class DetachConsumer final : public Consumer<Res> {
+    class DetachConsumer final : public Consumer {
     public:
       void set_cancellation_handle(Future) override {
       }
