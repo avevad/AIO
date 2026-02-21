@@ -169,7 +169,7 @@ template<typename Res>
   auto *fiber = current_fiber.get();
 
   Expected<Res> expected = std::unexpected<std::exception_ptr>(nullptr);
-  std::move(future)
+  auto f = std::move(future)
     .map_expected(
       [this, fiber = std::move(current_fiber),
        &expected](std::expected<Res, std::exception_ptr> expected1) mutable -> std::expected<void, std::exception_ptr> {
@@ -177,13 +177,15 @@ template<typename Res>
         available_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
         return {};
       }
-    )
-    .detach();
+    );
 
   // Future consumer will live until executed once and the fiber will be held at least to this point.
   // Then the fiber will be moved into queue and by that means will live until resumed.
   // However, the consumer can be executed immediately, so TODO -- examine fiber lifetime more carefully at this moment:
   fiber->coro.yield();
+
+  // We should keep the future up to this point for proper cascade cancelling.
+  std::move(f).detach();
 
   if (!expected.has_value())
     std::rethrow_exception(expected.error());
@@ -223,9 +225,9 @@ void run_in_new(MainFunctor &&main) {
   auto sched = std::make_unique<BasicScheduler>();
 
   auto run_main = sched->async([sched = sched.get(), main = std::forward<MainFunctor>(main)] { main(sched); });
-  //auto catch_all = sched->async([](auto err) { panic("unhandled exception", err); });
+  auto catch_all = sched->async([](auto err) { panic("unhandled exception", err); });
 
-  sched->main = run_main();//.except_any(catch_all);
+  sched->main = run_main().except_any(catch_all);
   sched->run();
 }
 

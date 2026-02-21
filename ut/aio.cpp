@@ -101,6 +101,94 @@ TEST(AIO, Fiber) {
   });
 }
 
+TEST(AIO, FiberCancel) {
+  run_in_new([](BasicScheduler *sched) {
+    std::vector<int> seq;
+
+    auto f = sched->fiber([&] {
+      seq.push_back(1);
+      sched->yield();
+      seq.push_back(2);
+      sched->yield();
+      panic("fiber should be cancelled");
+    });
+
+    // Let the fiber start and suspend once.
+    sched->yield();
+    ASSERT_EQ(seq, (std::vector{1}));
+
+    std::move(f).cancel();
+
+    // Drain scheduler turns to process any pending resume if there is one.
+    for (int i = 0; i < 4; ++i)
+      sched->yield();
+    EXPECT_EQ(seq, (std::vector{1}));
+  });
+}
+
+TEST(AIO, FiberCancelCascade) {
+  run_in_new([](BasicScheduler *sched) {
+    bool root_started = false;
+    bool middle_started = false;
+    bool leaf_started = false;
+    bool blocker_started = false;
+    bool root_after_await = false;
+    bool middle_after_await = false;
+    bool leaf_after_await = false;
+    bool blocker_after_yield = false;
+
+    auto root = sched->fiber([&] {
+      root_started = true;
+
+      auto middle = sched->fiber([&] {
+        middle_started = true;
+
+        auto leaf = sched->fiber([&] {
+          leaf_started = true;
+
+          auto blocker = sched->fiber([&] {
+            blocker_started = true;
+            sched->yield();
+            blocker_after_yield = true;
+            panic("blocker should be cancelled");
+          });
+          sched->await(std::move(blocker));
+          leaf_after_await = true;
+          panic("leaf should be cancelled");
+        });
+        sched->await(std::move(leaf));
+        middle_after_await = true;
+        panic("middle should be cancelled");
+      });
+      sched->await(std::move(middle));
+      root_after_await = true;
+      panic("root should be cancelled");
+    });
+
+    // Run until every fiber starts and suspends in await(), or fail.
+    for (int i = 0; i < 16 && !(root_started && middle_started && leaf_started && blocker_started); ++i)
+      sched->yield();
+    ASSERT_TRUE(root_started);
+    ASSERT_TRUE(middle_started);
+    ASSERT_TRUE(leaf_started);
+    ASSERT_TRUE(blocker_started);
+    ASSERT_FALSE(root_after_await);
+    ASSERT_FALSE(middle_after_await);
+    ASSERT_FALSE(leaf_after_await);
+    ASSERT_FALSE(blocker_after_yield);
+
+    std::move(root).cancel();
+
+    // If cascade is broken, blocker may continue and one of panic traps will fire.
+    for (int i = 0; i < 8; ++i)
+      sched->yield();
+    EXPECT_FALSE(root_after_await);
+    EXPECT_FALSE(middle_after_await);
+    EXPECT_FALSE(leaf_after_await);
+    EXPECT_FALSE(blocker_after_yield);
+  });
+}
+
 TEST(AIO, Timers) {
   run_in_new([](BasicScheduler *sched) {
     auto past = std::chrono::steady_clock::now() - 1ms;
