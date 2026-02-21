@@ -528,15 +528,21 @@ namespace _impl {
     AIOXX_ASSUME(Bond::is_initialized());
     AIOXX_ASSUME(maybe_handler.has_value());
 
-    if (!consumed) {
-      (*maybe_handler)();
-      maybe_handler.reset();
-    }
+    // If the transfer was already completed, there is nothing to do.
+    if (consumed && (!Bond::is_alive() || Bond::get().fulfilled))
+      return;
+    // In other case, we need to prevent it from happening.
 
+    // This should be done first of all, because the bound promise can block cascade destruction.
     if (Bond::is_alive()) {
       Bond::get().hangup = true;
       Bond::get().maybe_consumer.reset();
     }
+
+    (*maybe_handler)();
+
+    maybe_handler.reset();
+    maybe_result.reset();
 
     auto _ = std::move(*this);
   }
