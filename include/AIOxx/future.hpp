@@ -315,7 +315,8 @@ namespace _impl {
 
     struct MappedConsumer final : MappedFuture::AbstractConsumer {
       MappedPromise promise;
-      explicit MappedConsumer(MappedPromise promise) : promise(std::move(promise)) {}
+      explicit MappedConsumer(MappedPromise promise) : promise(std::move(promise)) {
+      }
 
       void set_cancellation_handle(MappedFuture future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
@@ -329,7 +330,9 @@ namespace _impl {
     struct Consumer final : AbstractConsumer {
       MappedPromise promise;
       std::decay_t<AsyncFunctor> fun;
-      explicit Consumer(MappedPromise promise, std::decay_t<AsyncFunctor> &&fun) : promise(std::move(promise)), fun(std::move(fun)) {}
+      explicit Consumer(MappedPromise promise, std::decay_t<AsyncFunctor> &&fun)
+          : promise(std::move(promise)), fun(std::move(fun)) {
+      }
 
       void set_cancellation_handle(Future future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
@@ -359,7 +362,8 @@ namespace _impl {
   Future FutureBase<Res, Future, Promise>::except(AsyncHandler &&handler) && {
     struct NestedConsumer final : AbstractConsumer {
       Promise promise;
-      explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {}
+      explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {
+      }
 
       void set_cancellation_handle(Future future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
@@ -411,7 +415,8 @@ namespace _impl {
   Future FutureBase<Res, Future, Promise>::except_any(AsyncHandler &&handler) && {
     struct NestedConsumer final : AbstractConsumer {
       Promise promise;
-      explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {}
+      explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {
+      }
 
       void set_cancellation_handle(Future future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
@@ -596,7 +601,8 @@ namespace _impl {
 
   template<FutureResult Res, typename Promise, typename Future>
   PromiseBase<Res, Promise, Future>::PromiseBase(PromiseBase &&other) noexcept
-      : Bond(std::move(other)), fulfilled(other.fulfilled), maybe_consumer(std::move(other.maybe_consumer)), hangup(other.hangup) {
+      : Bond(std::move(other)), fulfilled(other.fulfilled), maybe_consumer(std::move(other.maybe_consumer)),
+        hangup(other.hangup) {
     other.fulfilled = false;
     other.maybe_consumer.reset();
     other.hangup = false;
@@ -696,10 +702,11 @@ template<FutureResult Res>
 template<typename AsyncFunctor, typename Res1>
 Future<Res1> Future<Res>::then(AsyncFunctor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
-    return Future<void>(std::move(*this).FutureBase::then([functor =
-                                                             std::forward<AsyncFunctor>(functor)](Res res) mutable {
-      return Future<_impl::Void>(functor(std::move(res)));
-    }));
+    return Future<void>(
+      std::move(*this).FutureBase::then([functor = std::forward<AsyncFunctor>(functor)](Res res) mutable {
+        return Future<_impl::Void>(functor(std::move(res)));
+      })
+    );
   } else {
     return std::move(*this).FutureBase::then(std::forward<AsyncFunctor>(functor));
   }
@@ -709,11 +716,12 @@ template<FutureResult Res>
 template<typename Functor, typename Res1>
 Future<Res>::Mapped<Res1> Future<Res>::map_result(Functor &&functor) && {
   if constexpr (std::is_void_v<Res1>) {
-    return Future<void>(std::move(*this).FutureBase::map_result([functor =
-                                                                   std::forward<Functor>(functor)](Res res) mutable {
-      functor(std::move(res));
-      return _impl::Void{};
-    }));
+    return Future<void>(
+      std::move(*this).FutureBase::map_result([functor = std::forward<Functor>(functor)](Res res) mutable {
+        functor(std::move(res));
+        return _impl::Void{};
+      })
+    );
   } else {
     return std::move(*this).FutureBase::map_result(std::forward<Functor>(functor));
   }

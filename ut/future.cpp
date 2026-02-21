@@ -233,7 +233,7 @@ TEST(Future, FunctorThrows) {
   bool handled = false;
 
   auto f = std::move(future).map_result(
-                                [](int) -> int { throw std::runtime_error("boom"); }
+                              [](int) -> int { throw std::runtime_error("boom"); }
   ).except_any([&](std::exception_ptr) {
     handled = true;
     return ok(7);
@@ -312,70 +312,86 @@ TEST(Future, CancelMap) {
   EXPECT_TRUE(hangup);
 }
 
-TEST(Future, CancelMapExp) {
+TEST(Future, CancelChainOk) {
   auto [promise, future] = Contract<int>();
-  bool hangup = false;
-  promise.set_hangup_handler([&] { hangup = true; });
-
-  auto f = std::move(future).map_expected([](Expected<int> e) { return e; });
-  std::move(f).cancel();
-  EXPECT_TRUE(hangup);
-}
-
-TEST(Future, CancelThen) {
-  auto [promise, future] = Contract<int>();
+  auto [nested_promise, nested_future] = Contract<int>();
+  bool map_called = false;
   bool then_called = false;
-  bool hangup = false;
-  promise.set_hangup_handler([&] { hangup = true; });
+  bool typed_called = false;
+  bool any_called = false;
+  bool tail_called = false;
+  bool nested_hangup = false;
+  nested_promise.set_hangup_handler([&] { nested_hangup = true; });
 
-  auto f = std::move(future).then([&](int) {
-    then_called = true;
-    return ok(1);
-  });
-  std::move(f).cancel();
+  auto f =
+    std::move(future)
+      .map_expected([&](Expected<int> e) {
+        map_called = true;
+        return e;
+      })
+      .then([&](int) {
+        then_called = true;
+        return std::move(nested_future);
+      })
+      .except<std::runtime_error>([&](std::runtime_error &) {
+        typed_called = true;
+        return ok(9);
+      })
+      .except_any([&](std::exception_ptr) {
+        any_called = true;
+        return ok(10);
+      })
+      .map_result([&](int x) {
+        tail_called = true;
+        return x + 1;
+      });
+
   std::move(promise).fulfill(1);
+  std::move(f).cancel();
 
-  EXPECT_TRUE(hangup);
+  EXPECT_TRUE(map_called);
+  EXPECT_TRUE(then_called);
+  EXPECT_FALSE(typed_called);
+  EXPECT_FALSE(any_called);
+  EXPECT_FALSE(tail_called);
+  EXPECT_TRUE(nested_hangup);
+}
+
+TEST(Future, CancelChainErr) {
+  auto [promise, future] = Contract<int>();
+  auto [nested_promise, nested_future] = Contract<int>();
+  bool then_called = false;
+  bool typed_called = false;
+  bool any_called = false;
+  bool tail_called = false;
+  bool nested_hangup = false;
+  nested_promise.set_hangup_handler([&] { nested_hangup = true; });
+
+  auto f =
+    std::move(future)
+      .then([&](int) {
+        then_called = true;
+        return ok(1);
+      })
+      .except<std::logic_error>([&](std::logic_error &) {
+        typed_called = true;
+        return ok(2);
+      })
+      .except_any([&](std::exception_ptr) {
+        any_called = true;
+        return std::move(nested_future);
+      })
+      .map_result([&](int x) {
+        tail_called = true;
+        return x + 1;
+      });
+
+  std::move(promise).fail(std::runtime_error("x"));
+  std::move(f).cancel();
+
   EXPECT_FALSE(then_called);
-}
-
-TEST(Future, CancelThenNest) {
-  auto [promise, future] = Contract<int>();
-  auto [nested_promise, nested_future] = Contract<int>();
-  bool nested_hangup = false;
-  nested_promise.set_hangup_handler([&] { nested_hangup = true; });
-
-  auto f = std::move(future).then([&](int) { return std::move(nested_future); });
-  std::move(promise).fulfill(1);
-  std::move(f).cancel();
-
-  EXPECT_TRUE(nested_hangup);
-}
-
-TEST(Future, CancelExceptNest) {
-  auto [promise, future] = Contract<int>();
-  auto [nested_promise, nested_future] = Contract<int>();
-  bool nested_hangup = false;
-  nested_promise.set_hangup_handler([&] { nested_hangup = true; });
-
-  auto f = std::move(future).except<std::runtime_error>([&](std::runtime_error &) {
-    return std::move(nested_future);
-  });
-  std::move(promise).fail(std::runtime_error("x"));
-  std::move(f).cancel();
-
-  EXPECT_TRUE(nested_hangup);
-}
-
-TEST(Future, CancelAnyNest) {
-  auto [promise, future] = Contract<int>();
-  auto [nested_promise, nested_future] = Contract<int>();
-  bool nested_hangup = false;
-  nested_promise.set_hangup_handler([&] { nested_hangup = true; });
-
-  auto f = std::move(future).except_any([&](std::exception_ptr) { return std::move(nested_future); });
-  std::move(promise).fail(std::runtime_error("x"));
-  std::move(f).cancel();
-
+  EXPECT_FALSE(typed_called);
+  EXPECT_TRUE(any_called);
+  EXPECT_FALSE(tail_called);
   EXPECT_TRUE(nested_hangup);
 }

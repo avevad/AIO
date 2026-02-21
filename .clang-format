@@ -31,6 +31,7 @@ BreakBeforeBraces: Custom
 BreakBeforeTernaryOperators: false
 ColumnLimit: 120
 ContinuationIndentWidth: 2
+PenaltyIndentedWhitespace: 1
 IncludeCategories:
   - Regex: '^<.*'
     Priority: 1
