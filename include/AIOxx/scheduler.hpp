@@ -168,6 +168,7 @@ template<typename Res>
   // See comments below.
   auto *fiber = current_fiber.get();
 
+  // TODO: expose raw `consume_with` API publicly and use it here for quicker fiber cancelling.
   Expected<Res> expected = std::unexpected<std::exception_ptr>(nullptr);
   auto f = std::move(future)
     .map_expected(
@@ -179,13 +180,17 @@ template<typename Res>
       }
     );
 
-  // Future consumer will live until executed once and the fiber will be held at least to this point.
-  // Then the fiber will be moved into queue and by that means will live until resumed.
-  // However, the consumer can be executed immediately, so TODO -- examine fiber lifetime more carefully at this moment:
-  fiber->coro.yield();
+  try {
+    // Future consumer will live until executed once and the fiber will be held at least to this point.
+    // Then the fiber will be moved into queue and by that means will live until resumed.
+    // However, the consumer can be executed immediately, so TODO: examine fiber lifetime more carefully at this moment.
+    fiber->coro.yield();
 
-  // We should keep the future up to this point for proper cascade cancelling.
-  std::move(f).detach();
+    // Keep the future up to this point for proper cascade cancelling.
+    std::move(f).detach();
+  } catch (_impl::CoroutineKiller &) {
+    std::move(f).cancel();
+  }
 
   if (!expected.has_value())
     std::rethrow_exception(expected.error());

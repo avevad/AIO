@@ -126,6 +126,7 @@ TEST(AIO, FiberCancel) {
   });
 }
 
+// Doesn't work, see scheduler.hpp:171
 TEST(AIO, FiberCancelCascade) {
   run_in_new([](BasicScheduler *sched) {
     bool root_started = false;
