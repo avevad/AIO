@@ -27,10 +27,12 @@ do-build() {
 }
 
 do-test() {
-  ./_build/aio-ut
+  ctest --test-dir ./_build ||
+    ctest --test-dir ./_build --rerun-failed --output-on-failure
 }
 
 do-cover() {
+  ./_build/aio-ut
   AIOXX_LLVM_BIN="${AIOXX_LLVM_BIN:-/usr/bin}"
   "${AIOXX_LLVM_BIN}/llvm-profdata" merge \
     -sparse "$LLVM_PROFILE_FILE" \

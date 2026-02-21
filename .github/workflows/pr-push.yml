@@ -40,7 +40,6 @@ jobs:
       - run: ci/pipeline install-deps
       - run: ci/pipeline configure
       - run: ci/pipeline build
-      - run: ci/pipeline test
       - run: ci/pipeline cover
 
   ubuntu-amd64-clang20-relwithdebinfo:
