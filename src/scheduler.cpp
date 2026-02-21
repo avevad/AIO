@@ -38,19 +38,19 @@ BasicScheduler::IO &BasicScheduler::io() {
 
 void BasicScheduler::stop() {
   AIOXX_ASSUME(current_fiber != nullptr);
-  auto &fiber = *current_fiber;
+  auto *fiber = current_fiber.get();
   available_tasks.emplace([this, fiber = std::move(current_fiber)] mutable {
     stopped = true;
-    fiber->kill();
+    fiber->coro.kill();
     fiber.reset();
   });
-  fiber.yield();
+  fiber->coro.yield();
 }
 
-void BasicScheduler::resume_fiber(FiberPtr fiber) {
+void BasicScheduler::resume_fiber(Fiber fiber) {
   AIOXX_ASSUME(current_fiber == nullptr);
   current_fiber = std::move(fiber);
-  current_fiber->resume();
+  current_fiber->coro.resume();
   AIOXX_ASSUME(current_fiber == nullptr);
 }
 
