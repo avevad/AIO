@@ -43,6 +43,8 @@ namespace _impl {
     void bind_to(P &promise);
 
     [[nodiscard]] bool is_free() const;
+    [[nodiscard]] bool is_fulfilled() const;
+    [[nodiscard]] bool is_completed() const;
 
     ~FutureBase();
 
@@ -302,6 +304,16 @@ namespace _impl {
   }
 
   template<FutureResult Res, typename Future, typename Promise>
+  bool FutureBase<Res, Future, Promise>::is_fulfilled() const {
+    return !Bond::is_alive() || Bond::get().fulfilled;
+  }
+
+  template<FutureResult Res, typename Future, typename Promise>
+  bool FutureBase<Res, Future, Promise>::is_completed() const {
+    return is_fulfilled() && consumed;
+  }
+
+  template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise>::~FutureBase() {
     AIOXX_ASSUME(is_free());
   }
@@ -534,7 +546,7 @@ namespace _impl {
     AIOXX_ASSUME(maybe_handler.has_value());
 
     // If the transfer was already completed, there is nothing to do.
-    if (consumed && (!Bond::is_alive() || Bond::get().fulfilled))
+    if (is_completed())
       return;
     // In other case, we need to prevent it from happening.
 
@@ -562,8 +574,6 @@ namespace _impl {
         if (!result.is_ok()) {
           try {
             std::rethrow_exception(result.move_as_err());
-          } catch (const CoroutineKiller &) {
-            // TODO: this shouldn't be here. See `BasicEventLoop::fiber()`.
           } catch (...) {
             warning("unhandled error in detached future", std::current_exception());
           }

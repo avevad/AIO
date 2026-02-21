@@ -36,22 +36,13 @@ BasicScheduler::IO &BasicScheduler::io() {
   return fd_io;
 }
 
-void BasicScheduler::stop() {
-  AIOXX_ASSUME(current_fiber != nullptr);
-  auto *fiber = current_fiber.get();
-  available_tasks.emplace([this, fiber = std::move(current_fiber)] mutable {
-    stopped = true;
-    fiber->coro.kill();
-    fiber.reset();
-  });
-  fiber->coro.yield();
-}
-
 void BasicScheduler::resume_fiber(Fiber fiber) {
   AIOXX_ASSUME(current_fiber == nullptr);
-  current_fiber = std::move(fiber);
-  current_fiber->coro.resume();
-  AIOXX_ASSUME(current_fiber == nullptr);
+  if (!fiber->is_cancelled()) {
+    current_fiber = std::move(fiber);
+    current_fiber->coro.resume();
+    AIOXX_ASSUME(current_fiber == nullptr);
+  } else fiber->coro.kill();
 }
 
 const StreamFD &BasicScheduler::std_in() {
@@ -75,7 +66,7 @@ Future<void> BasicScheduler::deadline(const std::chrono::time_point<std::chrono:
 
 void BasicScheduler::run() {
   try {
-    while (!stopped) {
+    while (!main.is_fulfilled()) {
       { // Check pending tasks for immediate availability -- this is crucial for fairness guarantee.
         auto now = std::chrono::steady_clock::now();
         while (!pending_timed_tasks.empty() && pending_timed_tasks.begin()->when <= now) {
@@ -95,12 +86,12 @@ void BasicScheduler::run() {
       }
 
       { // Otherwise block on I/O and wait until anything happens...
-        AIOXX_ASSUME(!pending_io_tasks.empty());
         auto deadline = pending_timed_tasks.empty() ? std::nullopt : std::optional{pending_timed_tasks.begin()->when};
         if (auto task = pending_io_tasks.poll(deadline))
           available_tasks.push(std::move(*task));
       }
     }
+    std::move(main).detach();
   } catch (...) {
     panic("unexpected exception in scheduler", std::current_exception());
   }

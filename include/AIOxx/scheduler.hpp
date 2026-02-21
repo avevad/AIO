@@ -70,8 +70,9 @@ private:
   struct BaseFiber {
     Coroutine<void()> coro;
     template<typename... CoroArgs>
-    explicit BaseFiber(CoroArgs &&...args) : coro(std::forward<CoroArgs>(args)...) {
-    }
+    explicit BaseFiber(CoroArgs &&...args);
+
+    virtual bool is_cancelled() = 0;
     virtual ~BaseFiber() = default;
   };
 
@@ -79,9 +80,9 @@ private:
   struct TypedFiber : BaseFiber {
     Promise<Res> promise;
     template<typename... CoroArgs>
-    explicit TypedFiber(Promise<Res> promise, CoroArgs &&...args)
-        : BaseFiber(std::forward<CoroArgs>(args)...), promise(std::move(promise)) {
-    }
+    explicit TypedFiber(Promise<Res> promise, CoroArgs &&...args);
+
+    bool is_cancelled() override;
   };
 
   using Fiber = std::unique_ptr<BaseFiber>;
@@ -98,7 +99,6 @@ private:
   friend void run_in_new(MainFunctor &&main);
 
   void run();
-  void stop();
 
   void resume_fiber(Fiber fiber);
 
@@ -106,7 +106,7 @@ private:
   std::multiset<Timer> pending_timed_tasks = {};
   IOQueue pending_io_tasks = {};
 
-  bool stopped = false;
+  Future<void> main;
   Fiber current_fiber = nullptr;
 
   IO fd_io{*this};
@@ -140,9 +140,7 @@ Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&f
           std::apply(invoker, std::move(args));
           std::move(promise).fulfill();
         }
-        /*
-      TODO: with proper implementation of Future cancelling this should look like this:
-      } catch (const _impl::CoroutineKiller &) {*/
+      } catch (const _impl::CoroutineKiller &) {
       } catch (...) {
         std::move(promise).fail_any(std::current_exception());
       }
@@ -196,6 +194,21 @@ template<typename Res>
     return;
 }
 
+template<typename... CoroArgs>
+BasicScheduler::BaseFiber::BaseFiber(CoroArgs &&...args) : coro(std::forward<CoroArgs>(args)...) {
+}
+
+template<typename Res>
+template<typename... CoroArgs>
+BasicScheduler::TypedFiber<Res>::TypedFiber(Promise<Res> promise, CoroArgs &&...args)
+    : BaseFiber(std::forward<CoroArgs>(args)...), promise(std::move(promise)) {
+}
+
+template<typename Res>
+bool BasicScheduler::TypedFiber<Res>::is_cancelled() {
+  return promise.is_free();
+}
+
 template<typename Rep, typename Period>
 Future<void> BasicScheduler::timeout(const std::chrono::duration<Rep, Period> &duration) {
   return deadline(
@@ -209,12 +222,10 @@ template<typename MainFunctor>
 void run_in_new(MainFunctor &&main) {
   auto sched = std::make_unique<BasicScheduler>();
 
-  auto main_executed = sched->async([sched = sched.get(), main = std::forward<MainFunctor>(main)] { main(sched); });
-  auto exception_caught = sched->async([](auto err) { panic("unhandled exception", err); });
-  auto sched_stopped = sched->async([sched = sched.get()] { sched->stop(); });
+  auto run_main = sched->async([sched = sched.get(), main = std::forward<MainFunctor>(main)] { main(sched); });
+  //auto catch_all = sched->async([](auto err) { panic("unhandled exception", err); });
 
-  main_executed().except_any(exception_caught).then(sched_stopped).detach();
-
+  sched->main = run_main();//.except_any(catch_all);
   sched->run();
 }
 
