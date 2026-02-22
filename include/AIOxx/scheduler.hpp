@@ -9,7 +9,6 @@
 #include <set>
 
 namespace AIO {
-struct StdIO;
 class StreamFD;
 class BasicScheduler {
 public:
@@ -110,7 +109,9 @@ private:
   Fiber current_fiber = nullptr;
 
   IO fd_io{*this};
-  std::unique_ptr<StdIO> std_io;
+  std::unique_ptr<StreamFD> maybe_std_in;
+  std::unique_ptr<StreamFD> maybe_std_out;
+  std::unique_ptr<StreamFD> maybe_std_err;
 };
 } // namespace AIO
 
