@@ -38,7 +38,7 @@ void warning(
   const std::string &what, std::exception_ptr err, std::source_location where = std::source_location::current()
 );
 
-template<typename Derived, typename Derived1>
+template<typename Derived, typename Derived1, bool Master>
 class Bond {
 public:
   Bond() = default;
@@ -61,9 +61,9 @@ protected:
   Derived1 &get() const;
 
 private:
-  friend class Bond<Derived1, Derived>;
+  friend class Bond<Derived1, Derived, !Master>;
 
-  Bond<Derived1, Derived> *get_base_ptr();
+  Bond<Derived1, Derived, !Master> *get_base_ptr();
 
   std::optional<Derived1 *> maybe_ptr = std::nullopt;
 };
@@ -106,16 +106,16 @@ struct ExpectedResult {
 
 
 namespace AIO {
-template<typename Derived, typename Derived1>
-Bond<Derived, Derived1>::Bond(Bond &&other) noexcept : maybe_ptr(other.maybe_ptr) {
+template<typename Derived, typename Derived1, bool Master>
+Bond<Derived, Derived1, Master>::Bond(Bond &&other) noexcept : maybe_ptr(other.maybe_ptr) {
   other.maybe_ptr.reset();
   if (auto bound = get_base_ptr()) {
     bound->maybe_ptr = static_cast<Derived *>(this);
   }
 }
 
-template<typename Derived, typename Derived1>
-Bond<Derived, Derived1> &Bond<Derived, Derived1>::operator=(Bond &&other) noexcept {
+template<typename Derived, typename Derived1, bool Master>
+Bond<Derived, Derived1, Master> &Bond<Derived, Derived1, Master>::operator=(Bond &&other) noexcept {
   if (&other == this) {
     return *this;
   }
@@ -133,47 +133,47 @@ Bond<Derived, Derived1> &Bond<Derived, Derived1>::operator=(Bond &&other) noexce
   return *this;
 }
 
-template<typename Derived, typename Derived1>
-Bond<Derived, Derived1>::~Bond() {
+template<typename Derived, typename Derived1, bool Master>
+Bond<Derived, Derived1, Master>::~Bond() {
   if (auto bound = get_base_ptr()) {
     bound->maybe_ptr = nullptr;
   }
 }
 
-template<typename Derived, typename Derived1>
-void Bond<Derived, Derived1>::initialize(Derived1 &bound) {
+template<typename Derived, typename Derived1, bool Master>
+void Bond<Derived, Derived1, Master>::initialize(Derived1 &bound) {
   AIOXX_ASSUME(!is_initialized());
   AIOXX_ASSUME(!bound.is_initialized());
   maybe_ptr = &bound;
   bound.maybe_ptr = static_cast<Derived *>(this);
 }
 
-template<typename Derived, typename Derived1>
-bool Bond<Derived, Derived1>::is_initialized() const {
+template<typename Derived, typename Derived1, bool Master>
+bool Bond<Derived, Derived1, Master>::is_initialized() const {
   return maybe_ptr.has_value();
 }
 
-template<typename Derived, typename Derived1>
-bool Bond<Derived, Derived1>::is_alive() const {
+template<typename Derived, typename Derived1, bool Master>
+bool Bond<Derived, Derived1, Master>::is_alive() const {
   AIOXX_ASSUME(is_initialized());
   return maybe_ptr != nullptr;
 }
 
-template<typename Derived, typename Derived1>
-Derived1 *Bond<Derived, Derived1>::get_ptr() const {
+template<typename Derived, typename Derived1, bool Master>
+Derived1 *Bond<Derived, Derived1, Master>::get_ptr() const {
   AIOXX_ASSUME(is_initialized());
   return *maybe_ptr;
 }
 
-template<typename Derived, typename Derived1>
-Derived1 &Bond<Derived, Derived1>::get() const {
+template<typename Derived, typename Derived1, bool Master>
+Derived1 &Bond<Derived, Derived1, Master>::get() const {
   AIOXX_ASSUME(is_alive());
   return **maybe_ptr;
 }
 
-template<typename Derived, typename Derived1>
-Bond<Derived1, Derived> *Bond<Derived, Derived1>::get_base_ptr() {
-  return maybe_ptr.has_value() ? static_cast<Bond<Derived1, Derived> *>(*maybe_ptr) : nullptr;
+template<typename Derived, typename Derived1, bool Master>
+Bond<Derived1, Derived, !Master> *Bond<Derived, Derived1, Master>::get_base_ptr() {
+  return maybe_ptr.has_value() ? static_cast<Bond<Derived1, Derived, !Master> *>(*maybe_ptr) : nullptr;
 }
 
 template<typename Res>
