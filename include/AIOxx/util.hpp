@@ -85,7 +85,7 @@ public:
 
   void bind_to(BoundStorage<T, !Master> &bound);
 
-  template<typename T1 = T>
+  template<typename T1>
   void set(T1 &&value);
 
   T &get();
@@ -218,31 +218,20 @@ BoundStorage<T, Master>::~BoundStorage() {
 
 template<typename T, bool Master>
 void BoundStorage<T, Master>::bind_to(BoundStorage<T, !Master> &bound) {
+  AIOXX_ASSUME(!maybe_value.has_value());
+  AIOXX_ASSUME(!bound.maybe_value.has_value());
   Bond::initialize(bound);
-
-  if constexpr (Master) {
-    if (!maybe_value.has_value() && bound.maybe_value.has_value()) {
-      maybe_value = std::move(bound.maybe_value);
-      bound.maybe_value.reset();
-    } else if (maybe_value.has_value()) {
-      bound.maybe_value.reset();
-    }
-  } else {
-    auto &master = Bond::get();
-    if (!master.maybe_value.has_value() && maybe_value.has_value()) {
-      master.maybe_value = std::move(maybe_value);
-    }
-    maybe_value.reset();
-  }
 }
 
 template<typename T, bool Master>
 template<typename T1>
 void BoundStorage<T, Master>::set(T1 &&value) {
+  AIOXX_ASSUME(Bond::is_initialized());
+
   if constexpr (Master) {
     maybe_value = std::forward<T1>(value);
   } else {
-    if (Bond::is_initialized() && Bond::is_alive()) {
+    if (Bond::is_alive()) {
       Bond::get().set(std::forward<T1>(value));
     } else {
       maybe_value = std::forward<T1>(value);
@@ -252,11 +241,13 @@ void BoundStorage<T, Master>::set(T1 &&value) {
 
 template<typename T, bool Master>
 T &BoundStorage<T, Master>::get() {
+  AIOXX_ASSUME(Bond::is_initialized());
+
   if constexpr (Master) {
     AIOXX_ASSUME(maybe_value.has_value());
     return *maybe_value;
   } else {
-    if (Bond::is_initialized() && Bond::is_alive()) {
+    if (Bond::is_alive()) {
       return Bond::get().get();
     }
     AIOXX_ASSUME(maybe_value.has_value());
@@ -266,11 +257,13 @@ T &BoundStorage<T, Master>::get() {
 
 template<typename T, bool Master>
 const T &BoundStorage<T, Master>::get() const {
+  AIOXX_ASSUME(Bond::is_initialized());
+
   if constexpr (Master) {
     AIOXX_ASSUME(maybe_value.has_value());
     return *maybe_value;
   } else {
-    if (Bond::is_initialized() && Bond::is_alive()) {
+    if (Bond::is_alive()) {
       return Bond::get().get();
     }
     AIOXX_ASSUME(maybe_value.has_value());
