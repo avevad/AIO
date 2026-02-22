@@ -72,6 +72,7 @@ if (AIOXX_BUILD_TESTS)
             ut/coroutine.cpp
             ut/future.cpp
             ut/aio.cpp
+            ut/util.cpp
     )
     target_include_directories(aio-ut PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(aio-ut PRIVATE aio-static GTest::gtest_main)

@@ -68,6 +68,35 @@ private:
   std::optional<Derived1 *> maybe_ptr = std::nullopt;
 };
 
+template<typename T, bool Master>
+class BoundStorage : public Bond<BoundStorage<T, Master>, BoundStorage<T, !Master>, Master> {
+  using Bond = Bond<BoundStorage, BoundStorage<T, !Master>, Master>;
+
+public:
+  BoundStorage() = default;
+
+  BoundStorage(BoundStorage &&) noexcept = default;
+  BoundStorage &operator=(BoundStorage &&) noexcept = default;
+
+  BoundStorage(const BoundStorage &) = delete;
+  BoundStorage &operator=(const BoundStorage &) = delete;
+
+  ~BoundStorage();
+
+  void bind_to(BoundStorage<T, !Master> &bound);
+
+  template<typename T1 = T>
+  void set(T1 &&value);
+
+  T &get();
+  const T &get() const;
+
+private:
+  friend class BoundStorage<T, !Master>;
+
+  std::optional<T> maybe_value = std::nullopt;
+};
+
 template<typename Res>
 using Expected = std::expected<Res, std::exception_ptr>;
 
@@ -174,6 +203,79 @@ Derived1 &Bond<Derived, Derived1, Master>::get() const {
 template<typename Derived, typename Derived1, bool Master>
 Bond<Derived1, Derived, !Master> *Bond<Derived, Derived1, Master>::get_base_ptr() {
   return maybe_ptr.has_value() ? static_cast<Bond<Derived1, Derived, !Master> *>(*maybe_ptr) : nullptr;
+}
+
+template<typename T, bool Master>
+BoundStorage<T, Master>::~BoundStorage() {
+  if constexpr (Master) {
+    if (maybe_value.has_value() && Bond::is_initialized() && Bond::is_alive()) {
+      auto &slave = Bond::get();
+      slave.maybe_value = std::move(maybe_value);
+      maybe_value.reset();
+    }
+  }
+}
+
+template<typename T, bool Master>
+void BoundStorage<T, Master>::bind_to(BoundStorage<T, !Master> &bound) {
+  Bond::initialize(bound);
+
+  if constexpr (Master) {
+    if (!maybe_value.has_value() && bound.maybe_value.has_value()) {
+      maybe_value = std::move(bound.maybe_value);
+      bound.maybe_value.reset();
+    } else if (maybe_value.has_value()) {
+      bound.maybe_value.reset();
+    }
+  } else {
+    auto &master = Bond::get();
+    if (!master.maybe_value.has_value() && maybe_value.has_value()) {
+      master.maybe_value = std::move(maybe_value);
+    }
+    maybe_value.reset();
+  }
+}
+
+template<typename T, bool Master>
+template<typename T1>
+void BoundStorage<T, Master>::set(T1 &&value) {
+  if constexpr (Master) {
+    maybe_value = std::forward<T1>(value);
+  } else {
+    if (Bond::is_initialized() && Bond::is_alive()) {
+      Bond::get().set(std::forward<T1>(value));
+    } else {
+      maybe_value = std::forward<T1>(value);
+    }
+  }
+}
+
+template<typename T, bool Master>
+T &BoundStorage<T, Master>::get() {
+  if constexpr (Master) {
+    AIOXX_ASSUME(maybe_value.has_value());
+    return *maybe_value;
+  } else {
+    if (Bond::is_initialized() && Bond::is_alive()) {
+      return Bond::get().get();
+    }
+    AIOXX_ASSUME(maybe_value.has_value());
+    return *maybe_value;
+  }
+}
+
+template<typename T, bool Master>
+const T &BoundStorage<T, Master>::get() const {
+  if constexpr (Master) {
+    AIOXX_ASSUME(maybe_value.has_value());
+    return *maybe_value;
+  } else {
+    if (Bond::is_initialized() && Bond::is_alive()) {
+      return Bond::get().get();
+    }
+    AIOXX_ASSUME(maybe_value.has_value());
+    return *maybe_value;
+  }
 }
 
 template<typename Res>
