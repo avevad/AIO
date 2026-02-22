@@ -829,5 +829,4 @@ inline Future<void>::Future(Future<_impl::Void> &&other) noexcept : FutureBase(s
 inline void Promise<void>::fulfill() && {
   std::move(*this).PromiseBase::fulfill(_impl::Void{});
 }
-
 } // namespace AIO
