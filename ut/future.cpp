@@ -395,3 +395,45 @@ TEST(Future, CancelChainErr) {
   EXPECT_FALSE(tail_called);
   EXPECT_TRUE(nested_hangup);
 }
+
+TEST(Future, DetachedCancel) {
+  auto [promise, future] = Contract<int>();
+  bool hangup = false;
+  promise.set_hangup_handler([&] { hangup = true; });
+
+  DetachedFuture<int> detached(std::move(future));
+  std::move(detached).cancel();
+  EXPECT_TRUE(hangup);
+}
+
+TEST(Future, ConsumedCancel) {
+  auto [promise, future] = Contract<int>();
+  bool hangup = false;
+  promise.set_hangup_handler([&] { hangup = true; });
+
+  ConsumedFuture<int> consumed(std::move(future));
+  std::move(consumed).cancel();
+  EXPECT_TRUE(hangup);
+}
+
+TEST(Future, ConsumedAutoCancel) {
+  auto [promise, future] = Contract<int>();
+  bool hangup = false;
+  promise.set_hangup_handler([&] { hangup = true; });
+
+  { ConsumedFuture<int> consumed(std::move(future)); }
+  EXPECT_TRUE(hangup);
+}
+
+TEST(Future, ConsumedDetached) {
+  auto [promise, future] = Contract<int>();
+  bool hangup = false;
+  promise.set_hangup_handler([&] { hangup = true; });
+
+  auto consumed = ConsumedFuture<int>(std::move(future));
+  auto detached = std::move(consumed).release();
+  EXPECT_FALSE(hangup);
+
+  { auto consumed1 = std::move(detached).hold(); }
+  EXPECT_TRUE(hangup);
+}

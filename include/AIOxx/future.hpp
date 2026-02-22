@@ -16,6 +16,12 @@ concept FutureResult = !std::is_reference_v<Res>;
 template<FutureResult Res>
 class Future;
 
+template<FutureResult Res>
+class ConsumedFuture;
+
+template<FutureResult Res>
+class DetachedFuture;
+
 namespace _impl {
   template<FutureResult Res, typename Promise, typename Future>
   class PromiseBase;
@@ -25,13 +31,15 @@ namespace _impl {
     using Bond = Bond<FutureBase, PromiseBase<Res, Promise, Future>, false>;
 
   public:
+    using CancellationHandle = DetachedFuture<Res>;
+
     FutureBase() = default;
     FutureBase(FutureBase &&other) noexcept;
     FutureBase &operator=(FutureBase &&other) noexcept;
 
     class AbstractConsumer {
     public:
-      virtual void set_cancellation_handle(Future future) = 0;
+      virtual void set_cancellation_handle(CancellationHandle future) = 0;
       virtual void consume(ExpectedResult<Res> result) = 0;
       virtual ~AbstractConsumer() = default;
     };
@@ -251,6 +259,46 @@ public:
   Promise<Res> promise = {};
   Future<Res> future = {};
 };
+
+template<FutureResult Res>
+class DetachedFuture {
+public:
+  explicit DetachedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
+  }
+
+  DetachedFuture(DetachedFuture &&) noexcept = default;
+  DetachedFuture &operator=(DetachedFuture &&) noexcept = default;
+
+  DetachedFuture(const DetachedFuture &) = delete;
+  DetachedFuture &operator=(const DetachedFuture &) = delete;
+
+  void cancel() &&;
+  ConsumedFuture<Res> hold() &&;
+
+private:
+  Future<Res> future;
+};
+
+template<FutureResult Res>
+class [[nodiscard]] ConsumedFuture {
+public:
+  explicit ConsumedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
+  }
+
+  ConsumedFuture(ConsumedFuture &&) noexcept = default;
+  ConsumedFuture &operator=(ConsumedFuture &&) noexcept = default;
+
+  ConsumedFuture(const ConsumedFuture &) = delete;
+  ConsumedFuture &operator=(const ConsumedFuture &) = delete;
+
+  ~ConsumedFuture();
+
+  void cancel() &&;
+  DetachedFuture<Res> release() &&;
+
+private:
+  Future<Res> future;
+};
 } // namespace AIO
 
 
@@ -330,7 +378,7 @@ namespace _impl {
       explicit MappedConsumer(MappedPromise promise) : promise(std::move(promise)) {
       }
 
-      void set_cancellation_handle(MappedFuture future) override {
+      void set_cancellation_handle(DetachedFuture<Res1> future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
       }
 
@@ -346,7 +394,7 @@ namespace _impl {
           : promise(std::move(promise)), fun(std::move(fun)) {
       }
 
-      void set_cancellation_handle(Future future) override {
+      void set_cancellation_handle(CancellationHandle future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
       }
 
@@ -377,7 +425,7 @@ namespace _impl {
       explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {
       }
 
-      void set_cancellation_handle(Future future) override {
+      void set_cancellation_handle(CancellationHandle future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
       }
 
@@ -393,7 +441,7 @@ namespace _impl {
           : promise(std::move(promise)), handler(std::move(handler)) {
       }
 
-      void set_cancellation_handle(Future future) override {
+      void set_cancellation_handle(CancellationHandle future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
       }
 
@@ -430,7 +478,7 @@ namespace _impl {
       explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {
       }
 
-      void set_cancellation_handle(Future future) override {
+      void set_cancellation_handle(CancellationHandle future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
       }
 
@@ -446,7 +494,7 @@ namespace _impl {
           : promise(std::move(promise)), handler(std::move(handler)) {
       }
 
-      void set_cancellation_handle(Future future) override {
+      void set_cancellation_handle(CancellationHandle future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
       }
 
@@ -486,7 +534,7 @@ namespace _impl {
           : promise(std::move(promise)), functor(std::move(functor)) {
       }
 
-      void set_cancellation_handle(Future future) override {
+      void set_cancellation_handle(CancellationHandle future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
       }
 
@@ -521,7 +569,7 @@ namespace _impl {
           : promise(std::move(promise)), functor(std::move(functor)) {
       }
 
-      void set_cancellation_handle(Future future) override {
+      void set_cancellation_handle(CancellationHandle future) override {
         promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
       }
 
@@ -542,15 +590,9 @@ namespace _impl {
 
   template<FutureResult Res, typename Future, typename Promise>
   void FutureBase<Res, Future, Promise>::cancel() && {
-    AIOXX_ASSUME(Bond::is_initialized());
-    AIOXX_ASSUME(maybe_handler.has_value());
-
-    // If the transfer was already completed, there is nothing to do.
-    if (is_completed())
+    if (!Bond::is_initialized() || is_completed() || !maybe_handler.has_value())
       return;
-    // In other case, we need to prevent it from happening.
 
-    // This should be done first of all, because the bound promise can block cascade destruction.
     if (Bond::is_alive()) {
       Bond::get().hangup = true;
       Bond::get().maybe_consumer.reset();
@@ -567,7 +609,7 @@ namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   void FutureBase<Res, Future, Promise>::detach() && {
     struct Consumer final : AbstractConsumer {
-      void set_cancellation_handle(Future) override {
+      void set_cancellation_handle(CancellationHandle) override {
       }
 
       void consume(ExpectedResult result) override {
@@ -598,7 +640,7 @@ namespace _impl {
     auto *bound_promise = Bond::is_alive() ? &Bond::get() : nullptr;
 
     if (consumer != nullptr) {
-      consumer->set_cancellation_handle(std::move(*static_cast<Future *>(this)));
+      consumer->set_cancellation_handle(CancellationHandle(std::move(*static_cast<Future *>(this))));
     }
 
     if (maybe_result1.has_value()) {
@@ -816,6 +858,31 @@ Future<void>::Mapped<Res1> Future<void>::map_expected(Functor &&functor) && {
       return functor(std::move(expected).transform([](auto) {}));
     });
   }
+}
+
+template<FutureResult Res>
+void DetachedFuture<Res>::cancel() && {
+  std::move(future).cancel();
+}
+
+template<FutureResult Res>
+ConsumedFuture<Res> DetachedFuture<Res>::hold() && {
+  return ConsumedFuture<Res>(std::move(future));
+}
+
+template<FutureResult Res>
+ConsumedFuture<Res>::~ConsumedFuture() {
+  std::move(future).cancel();
+}
+
+template<FutureResult Res>
+void ConsumedFuture<Res>::cancel() && {
+  std::move(future).cancel();
+}
+
+template<FutureResult Res>
+DetachedFuture<Res> ConsumedFuture<Res>::release() && {
+  return DetachedFuture<Res>(std::move(future));
 }
 
 template<typename Res>
