@@ -31,18 +31,10 @@ namespace _impl {
     using Bond = Bond<FutureBase, PromiseBase<Res, Promise, Future>, false>;
 
   public:
-    using CancellationHandle = DetachedFuture<Res>;
 
     FutureBase() = default;
     FutureBase(FutureBase &&other) noexcept;
     FutureBase &operator=(FutureBase &&other) noexcept;
-
-    class AbstractConsumer {
-    public:
-      virtual void set_cancellation_handle(CancellationHandle future) = 0;
-      virtual void consume(ExpectedResult<Res> result) = 0;
-      virtual ~AbstractConsumer() = default;
-    };
 
     FutureBase(const FutureBase &) = delete;
     FutureBase &operator=(const FutureBase &) = delete;
@@ -60,7 +52,7 @@ namespace _impl {
     using Result = Res;
     using ExpectedResult = ExpectedResult<Res>;
     using HangupHandler = std::move_only_function<void()>;
-    using ConsumerPtr = std::unique_ptr<AbstractConsumer>;
+    using Consumer = std::function<void(ExpectedResult)>;
 
     template<typename AsyncFunctor, typename Res1 = std::invoke_result_t<AsyncFunctor, Res>::Result>
     auto then(AsyncFunctor &&functor) &&;
@@ -87,7 +79,8 @@ namespace _impl {
     template<FutureResult Res1, typename Promise1, typename Future1>
     friend class PromiseBase;
 
-    void consume_with(ConsumerPtr consumer) &&;
+    template<typename Consumer>
+    ConsumedFuture<Res> consume_with(Consumer consumer) &&;
 
     bool consumed = false;
     std::optional<ExpectedResult> maybe_result = std::nullopt;
@@ -117,8 +110,7 @@ namespace _impl {
     using Result = Res;
     using ExpectedResult = ExpectedResult<Res>;
     using HangupHandler = std::move_only_function<void()>;
-    using ConsumerBase = typename FutureBase<Res, Future, Promise>::AbstractConsumer;
-    using ConsumerPtr = std::unique_ptr<ConsumerBase>;
+    using Consumer = FutureBase<Res, Future, Promise>::Consumer;
 
     template<typename F1>
     void set_hangup_handler(F1 &&handler);
@@ -139,7 +131,7 @@ namespace _impl {
     void set(ExpectedResult result) &&;
 
     bool fulfilled = false;
-    ConsumerPtr maybe_consumer = nullptr;
+    std::optional<Consumer> maybe_consumer = std::nullopt;
     bool hangup = false;
   };
 
@@ -372,152 +364,122 @@ namespace _impl {
     using MappedFuture = Future::template Mapped<Res1>;
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     using MappedPromise = AIO::Promise<Res1>;
-
-    struct MappedConsumer final : MappedFuture::AbstractConsumer {
-      MappedPromise promise;
-      explicit MappedConsumer(MappedPromise promise) : promise(std::move(promise)) {
-      }
-
-      void set_cancellation_handle(DetachedFuture<Res1> future) override {
-        promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
-      }
-
-      void consume(MappedExpected result) override {
-        std::move(promise).set(std::move(result));
-      }
-    };
-
-    struct Consumer final : AbstractConsumer {
-      MappedPromise promise;
-      std::decay_t<AsyncFunctor> fun;
-      explicit Consumer(MappedPromise promise, std::decay_t<AsyncFunctor> &&fun)
-          : promise(std::move(promise)), fun(std::move(fun)) {
-      }
-
-      void set_cancellation_handle(CancellationHandle future) override {
-        promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
-      }
-
-      void consume(ExpectedResult result) override {
-        if (result.is_ok()) {
-          try {
-            MappedFuture future1 = fun(result.move_as_ok());
-            std::move(future1).consume_with(std::make_unique<MappedConsumer>(std::move(promise)));
-          } catch (...) {
-            std::move(promise).set(MappedExpected::make_err_from_current());
-          }
-        } else {
-          std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
-        }
-      }
-    };
-
     auto [promise, future] = Contract<Res1>();
-    std::move(*this).consume_with(std::make_unique<Consumer>(std::move(promise), std::forward<AsyncFunctor>(functor)));
+    auto promise_ptr = std::make_shared<MappedPromise>(std::move(promise));
+    auto fun_ptr = std::make_shared<std::decay_t<AsyncFunctor>>(std::forward<AsyncFunctor>(functor));
+
+    auto self = std::move(*this).consume_with([promise_ptr, fun_ptr](ExpectedResult result) mutable {
+      if (result.is_ok()) {
+        try {
+          MappedFuture future1 = (*fun_ptr)(result.move_as_ok());
+          auto nested_consumed = std::move(future1).consume_with([promise_ptr](MappedExpected result1) mutable {
+            std::move(*promise_ptr).set(std::move(result1));
+          });
+          auto nested_detached = std::move(nested_consumed).release();
+          if (!promise_ptr->is_free()) {
+            promise_ptr->set_hangup_handler(
+              [future = std::move(nested_detached)]() mutable { std::move(future).cancel(); }
+            );
+          }
+        } catch (...) {
+          std::move(*promise_ptr).set(MappedExpected::make_err_from_current());
+        }
+      } else {
+        std::move(*promise_ptr).set(MappedExpected::make_err(result.move_as_err()));
+      }
+    });
+
+    using MappedFutureBase = FutureBase<Res1, MappedFuture, MappedPromise>;
+    if (auto *bound_promise = static_cast<MappedFutureBase &>(future).get_bound_promise_ptr()) {
+      bound_promise->set_hangup_handler(
+        [future = std::move(self).release()]() mutable { std::move(future).cancel(); }
+      );
+    }
+
     return std::move(future);
   }
 
   template<FutureResult Res, typename Future, typename Promise>
   template<typename Exception, typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except(AsyncHandler &&handler) && {
-    struct NestedConsumer final : AbstractConsumer {
-      Promise promise;
-      explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {
-      }
+    auto [promise, future] = Contract<Res>();
+    auto promise_ptr = std::make_shared<Promise>(std::move(promise));
+    auto handler_ptr = std::make_shared<std::decay_t<AsyncHandler>>(std::forward<AsyncHandler>(handler));
 
-      void set_cancellation_handle(CancellationHandle future) override {
-        promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
-      }
-
-      void consume(ExpectedResult result) override {
-        std::move(promise).set(std::move(result));
-      }
-    };
-
-    struct Consumer final : AbstractConsumer {
-      Promise promise;
-      std::decay_t<AsyncHandler> handler;
-      explicit Consumer(Promise promise, std::decay_t<AsyncHandler> &&handler)
-          : promise(std::move(promise)), handler(std::move(handler)) {
-      }
-
-      void set_cancellation_handle(CancellationHandle future) override {
-        promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
-      }
-
-      void consume(ExpectedResult result) override {
-        if (!result.is_ok()) {
+    auto self = std::move(*this).consume_with([promise_ptr, handler_ptr](ExpectedResult result) mutable {
+      if (!result.is_ok()) {
+        try {
+          std::rethrow_exception(result.move_as_err());
+        } catch (Exception &e) {
           try {
-            std::rethrow_exception(result.move_as_err());
-          } catch (Exception &e) {
-            try {
-              Future future1 = handler(e);
-              std::move(future1).consume_with(std::make_unique<NestedConsumer>(std::move(promise)));
-            } catch (...) {
-              std::move(promise).set(ExpectedResult::make_err_from_current());
+            Future future1 = (*handler_ptr)(e);
+            auto nested_consumed = std::move(future1).consume_with([promise_ptr](ExpectedResult result1) mutable {
+              std::move(*promise_ptr).set(std::move(result1));
+            });
+            auto nested_detached = std::move(nested_consumed).release();
+            if (!promise_ptr->is_free()) {
+              promise_ptr->set_hangup_handler(
+                [future = std::move(nested_detached)]() mutable { std::move(future).cancel(); }
+              );
             }
           } catch (...) {
-            std::move(promise).set(ExpectedResult::make_err_from_current());
+            std::move(*promise_ptr).set(ExpectedResult::make_err_from_current());
           }
-        } else {
-          std::move(promise).set(std::move(result));
+        } catch (...) {
+          std::move(*promise_ptr).set(ExpectedResult::make_err_from_current());
         }
+      } else {
+        std::move(*promise_ptr).set(std::move(result));
       }
-    };
+    });
 
-    auto [promise, future] = Contract<Res>();
-    std::move(*this).consume_with(std::make_unique<Consumer>(std::move(promise), std::forward<AsyncHandler>(handler)));
+    if (auto *bound_promise = static_cast<FutureBase &>(future).get_bound_promise_ptr()) {
+      bound_promise->set_hangup_handler(
+        [future = std::move(self).release()]() mutable { std::move(future).cancel(); }
+      );
+    }
+
     return std::move(future);
   }
 
   template<FutureResult Res, typename Future, typename Promise>
   template<typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except_any(AsyncHandler &&handler) && {
-    struct NestedConsumer final : AbstractConsumer {
-      Promise promise;
-      explicit NestedConsumer(Promise promise) : promise(std::move(promise)) {
-      }
-
-      void set_cancellation_handle(CancellationHandle future) override {
-        promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
-      }
-
-      void consume(ExpectedResult result) override {
-        std::move(promise).set(std::move(result));
-      }
-    };
-
-    struct Consumer final : AbstractConsumer {
-      Promise promise;
-      std::decay_t<AsyncHandler> handler;
-      explicit Consumer(Promise promise, std::decay_t<AsyncHandler> &&handler)
-          : promise(std::move(promise)), handler(std::move(handler)) {
-      }
-
-      void set_cancellation_handle(CancellationHandle future) override {
-        promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
-      }
-
-      void consume(ExpectedResult result) override {
-        if (!result.is_ok()) {
-          try {
-            std::rethrow_exception(result.move_as_err());
-          } catch (...) {
-            try {
-              Future future1 = handler(std::current_exception());
-              std::move(future1).consume_with(std::make_unique<NestedConsumer>(std::move(promise)));
-            } catch (...) {
-              std::move(promise).set(ExpectedResult::make_err_from_current());
-            }
-          }
-        } else {
-          std::move(promise).set(std::move(result));
-        }
-      }
-    };
-
     auto [promise, future] = Contract<Res>();
-    std::move(*this).consume_with(std::make_unique<Consumer>(std::move(promise), std::forward<AsyncHandler>(handler)));
+    auto promise_ptr = std::make_shared<Promise>(std::move(promise));
+    auto handler_ptr = std::make_shared<std::decay_t<AsyncHandler>>(std::forward<AsyncHandler>(handler));
+
+    auto self = std::move(*this).consume_with([promise_ptr, handler_ptr](ExpectedResult result) mutable {
+      if (!result.is_ok()) {
+        try {
+          std::rethrow_exception(result.move_as_err());
+        } catch (...) {
+          try {
+            Future future1 = (*handler_ptr)(std::current_exception());
+            auto nested_consumed = std::move(future1).consume_with([promise_ptr](ExpectedResult result1) mutable {
+              std::move(*promise_ptr).set(std::move(result1));
+            });
+            auto nested_detached = std::move(nested_consumed).release();
+            if (!promise_ptr->is_free()) {
+              promise_ptr->set_hangup_handler(
+                [future = std::move(nested_detached)]() mutable { std::move(future).cancel(); }
+              );
+            }
+          } catch (...) {
+            std::move(*promise_ptr).set(ExpectedResult::make_err_from_current());
+          }
+        }
+      } else {
+        std::move(*promise_ptr).set(std::move(result));
+      }
+    });
+
+    if (auto *bound_promise = static_cast<FutureBase &>(future).get_bound_promise_ptr()) {
+      bound_promise->set_hangup_handler(
+        [future = std::move(self).release()]() mutable { std::move(future).cancel(); }
+      );
+    }
+
     return std::move(future);
   }
 
@@ -526,33 +488,25 @@ namespace _impl {
   auto FutureBase<Res, Future, Promise>::map_result(Functor &&functor) && {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     using MappedPromise = AIO::Promise<Res1>;
-
-    struct Consumer final : AbstractConsumer {
-      MappedPromise promise;
-      std::decay_t<Functor> functor;
-      explicit Consumer(MappedPromise promise, std::decay_t<Functor> &&functor)
-          : promise(std::move(promise)), functor(std::move(functor)) {
-      }
-
-      void set_cancellation_handle(CancellationHandle future) override {
-        promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
-      }
-
-      void consume(ExpectedResult result) override {
-        if (result.is_ok()) {
-          try {
-            std::move(promise).fulfill(functor(result.move_as_ok()));
-          } catch (...) {
-            std::move(promise).set(MappedExpected::make_err_from_current());
-          }
-        } else {
-          std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
-        }
-      }
-    };
-
     auto [promise, future] = Contract<Res1>();
-    std::move(*this).consume_with(std::make_unique<Consumer>(std::move(promise), std::forward<Functor>(functor)));
+    auto promise_ptr = std::make_shared<MappedPromise>(std::move(promise));
+    auto functor_ptr = std::make_shared<std::decay_t<Functor>>(std::forward<Functor>(functor));
+
+    auto self = std::move(*this).consume_with([promise_ptr, functor_ptr](ExpectedResult result) mutable {
+      if (result.is_ok()) {
+        try {
+          std::move(*promise_ptr).fulfill((*functor_ptr)(result.move_as_ok()));
+        } catch (...) {
+          std::move(*promise_ptr).set(MappedExpected::make_err_from_current());
+        }
+      } else {
+        std::move(*promise_ptr).set(MappedExpected::make_err(result.move_as_err()));
+      }
+    });
+
+    if (auto *bound_promise = future.promise_ptr())
+      bound_promise->set_hangup_handler([future = std::move(self).release()]() mutable { std::move(future).cancel(); });
+
     return std::move(future);
   }
 
@@ -561,29 +515,20 @@ namespace _impl {
   auto FutureBase<Res, Future, Promise>::map_expected(Functor &&functor) && {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     using MappedPromise = AIO::Promise<Res1>;
-
-    struct Consumer final : AbstractConsumer {
-      MappedPromise promise;
-      std::decay_t<Functor> functor;
-      explicit Consumer(MappedPromise promise, std::decay_t<Functor> &&functor)
-          : promise(std::move(promise)), functor(std::move(functor)) {
-      }
-
-      void set_cancellation_handle(CancellationHandle future) override {
-        promise.set_hangup_handler([future = std::move(future)]() mutable { std::move(future).cancel(); });
-      }
-
-      void consume(ExpectedResult result) override {
-        try {
-          std::move(promise).set(MappedExpected{.expected = functor(std::move(result.expected))});
-        } catch (...) {
-          std::move(promise).set(MappedExpected::make_err_from_current());
-        }
-      }
-    };
-
     auto [promise, future] = Contract<Res1>();
-    std::move(*this).consume_with(std::make_unique<Consumer>(std::move(promise), std::forward<Functor>(functor)));
+    auto promise_ptr = std::make_shared<MappedPromise>(std::move(promise));
+    auto functor_ptr = std::make_shared<std::decay_t<Functor>>(std::forward<Functor>(functor));
+
+    auto self = std::move(*this).consume_with([promise_ptr, functor_ptr](ExpectedResult result) mutable {
+      try {
+        std::move(*promise_ptr).set(MappedExpected{.expected = (*functor_ptr)(std::move(result.expected))});
+      } catch (...) {
+        std::move(*promise_ptr).set(MappedExpected::make_err_from_current());
+      }
+    });
+
+    if (auto *bound_promise = future.promise_ptr())
+      bound_promise->set_hangup_handler([future = std::move(self).release()]() mutable { std::move(future).cancel(); });
 
     return std::move(future);
   }
@@ -608,26 +553,23 @@ namespace _impl {
 
   template<FutureResult Res, typename Future, typename Promise>
   void FutureBase<Res, Future, Promise>::detach() && {
-    struct Consumer final : AbstractConsumer {
-      void set_cancellation_handle(CancellationHandle) override {
-      }
-
-      void consume(ExpectedResult result) override {
-        if (!result.is_ok()) {
-          try {
-            std::rethrow_exception(result.move_as_err());
-          } catch (...) {
-            warning("unhandled error in detached future", std::current_exception());
+    auto detached =
+      std::move(*this)
+        .consume_with([](ExpectedResult result) {
+          if (!result.is_ok()) {
+            try {
+              std::rethrow_exception(result.move_as_err());
+            } catch (...) {
+              warning("unhandled error in detached future", std::current_exception());
+            }
           }
-        }
-      }
-    };
-
-    std::move(*this).consume_with(std::make_unique<Consumer>());
+        })
+        .release();
   }
 
   template<FutureResult Res, typename Future, typename Promise>
-  void FutureBase<Res, Future, Promise>::consume_with(ConsumerPtr consumer) && {
+  template<typename Consumer1>
+  ConsumedFuture<Res> FutureBase<Res, Future, Promise>::consume_with(Consumer1 consumer) && {
     AIOXX_ASSUME(Bond::is_initialized());
     AIOXX_ASSUME(!consumed);
 
@@ -635,20 +577,13 @@ namespace _impl {
       return;
 
     consumed = true;
-    auto maybe_result1 = std::move(maybe_result);
-    maybe_result.reset();
-    auto *bound_promise = Bond::is_alive() ? &Bond::get() : nullptr;
+    if (maybe_result.has_value()) {
+      consumer(std::move(*maybe_result));
+      maybe_result.reset();
+    } else if (Bond::is_alive())
+      Bond::get().maybe_consumer = std::forward<Consumer1>(consumer);
 
-    if (consumer != nullptr) {
-      consumer->set_cancellation_handle(CancellationHandle(std::move(*static_cast<Future *>(this))));
-    }
-
-    if (maybe_result1.has_value()) {
-      AIOXX_ASSUME(consumer != nullptr);
-      consumer->consume(std::move(*maybe_result1));
-    } else if (bound_promise != nullptr) {
-      bound_promise->maybe_consumer = std::move(consumer);
-    }
+    return ConsumedFuture{std::move(this)};
   }
 
   template<FutureResult Res, typename Promise, typename Future>
@@ -736,8 +671,8 @@ namespace _impl {
       return;
 
     fulfilled = true;
-    if (maybe_consumer != nullptr) {
-      maybe_consumer->consume(std::move(result));
+    if (maybe_consumer.has_value()) {
+      (*maybe_consumer)(std::move(result));
       maybe_consumer.reset();
     } else if (Bond::is_alive())
       Bond::get().maybe_result.emplace(std::move(result));
