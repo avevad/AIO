@@ -40,7 +40,7 @@ IOQueue::Handle &IOQueue::Handle::operator=(Handle &&other) noexcept {
 
 Future<void> IOQueue::Handle::ready_in() {
   if (!fut_in.has_value()) {
-    auto [promise, future] = Contract<void>();
+    auto [promise, future] = make_contract<void>();
     prom_in = std::move(promise);
     fut_in = std::move(future);
   }
@@ -51,7 +51,7 @@ Future<void> IOQueue::Handle::ready_in() {
 
 Future<void> IOQueue::Handle::ready_out() {
   if (!fut_out.has_value()) {
-    auto [promise, future] = Contract<void>();
+    auto [promise, future] = make_contract<void>();
     prom_out = std::move(promise);
     fut_out = std::move(future);
   }
@@ -105,7 +105,7 @@ std::optional<IOQueue::Task> IOQueue::poll(std::optional<std::chrono::time_point
     if (ep_evt.events & (EPOLLIN | EPOLLERR | EPOLLHUP)) {
       if (!handle->fut_in.has_value()) {
         if (!handle->prom_in.has_value()) {
-          auto [promise, future] = Contract<void>();
+          auto [promise, future] = make_contract<void>();
           handle->prom_in = std::move(promise);
           handle->fut_in = std::move(future);
         }
@@ -116,7 +116,7 @@ std::optional<IOQueue::Task> IOQueue::poll(std::optional<std::chrono::time_point
     if (ep_evt.events & (EPOLLOUT | EPOLLERR | EPOLLHUP)) {
       if (!handle->fut_out.has_value()) {
         if (!handle->prom_out.has_value()) {
-          auto [promise, future] = Contract<void>();
+          auto [promise, future] = make_contract<void>();
           handle->prom_out = std::move(promise);
           handle->fut_out = std::move(future);
         }

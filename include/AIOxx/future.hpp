@@ -212,13 +212,18 @@ public:
 };
 
 template<typename Res>
-class Contract {
-public:
-  Contract();
+[[nodiscard]] auto make_contract() {
+  struct Contract {
+    Promise<Res> promise = {};
+    Future<Res> future = {};
 
-  Promise<Res> promise = {};
-  Future<Res> future = {};
-};
+    Contract() {
+      promise.bind_to(future);
+    }
+  };
+
+  return Contract{};
+}
 } // namespace AIO
 
 
@@ -272,7 +277,7 @@ namespace _impl {
   auto FutureBase<Res, Future, Promise>::then(AsyncFunctor &&functor) && {
     using MappedFuture = Future::template Mapped<Res1>;
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
-    auto [promise, future] = Contract<Res1>();
+    auto [promise, future] = make_contract<Res1>();
     std::move(*this).consume_with(
       [promise = std::move(promise), fun = std::forward<AsyncFunctor>(functor)](ExpectedResult result) mutable {
         if (result.is_ok()) {
@@ -295,7 +300,7 @@ namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   template<typename Exception, typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except(AsyncHandler &&handler) && {
-    auto [promise, future] = Contract<Res>();
+    auto [promise, future] = make_contract<Res>();
     std::move(*this).consume_with(
       [promise = std::move(promise), handler = std::forward<AsyncHandler>(handler)](ExpectedResult result) mutable {
         if (!result.is_ok()) {
@@ -324,7 +329,7 @@ namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   template<typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except_any(AsyncHandler &&handler) && {
-    auto [promise, future] = Contract<Res>();
+    auto [promise, future] = make_contract<Res>();
     std::move(*this).consume_with(
       [promise = std::move(promise), handler = std::forward<AsyncHandler>(handler)](ExpectedResult result) mutable {
         if (!result.is_ok()) {
@@ -352,7 +357,7 @@ namespace _impl {
   template<typename Functor, typename Res1>
   auto FutureBase<Res, Future, Promise>::map_result(Functor &&functor) && {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
-    auto [promise, future] = Contract<Res1>();
+    auto [promise, future] = make_contract<Res1>();
     std::move(*this).consume_with(
       [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
         if (result.is_ok()) {
@@ -373,7 +378,7 @@ namespace _impl {
   template<typename Functor, typename Res1>
   auto FutureBase<Res, Future, Promise>::map_expected(Functor &&functor) && {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
-    auto [promise, future] = Contract<Res1>();
+    auto [promise, future] = make_contract<Res1>();
     std::move(*this).consume_with(
       [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
         try {
@@ -600,11 +605,6 @@ Future<void>::Mapped<Res1> Future<void>::map_expected(Functor &&functor) && {
       return functor(std::move(expected).transform([](auto) {}));
     });
   }
-}
-
-template<typename Res>
-Contract<Res>::Contract() {
-  promise.bind_to(future);
 }
 
 inline Future<void>::Future(Future<_impl::Void> &&other) noexcept : FutureBase(std::move(other)) {

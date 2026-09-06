@@ -1,6 +1,6 @@
 #include "AIOxx/scheduler.hpp"
 
-#include "AIOxx/stdio.hpp"
+#include "AIOxx/fd.hpp"
 
 namespace AIO {
 
@@ -23,11 +23,11 @@ bool BasicScheduler::Timer::operator<(const Timer &timer) const {
   return when < timer.when;
 }
 
-BasicScheduler::BasicScheduler() : std_io(std::make_unique<StdIO>(StdIO::steal_from_system(fd_io))) {
+BasicScheduler::BasicScheduler() {
 }
 
 void BasicScheduler::yield() {
-  auto [promise, future] = AIO::Contract<void>();
+  auto [promise, future] = AIO::make_contract<void>();
   std::move(promise).fulfill();
   await(std::move(future));
 }
@@ -55,19 +55,28 @@ void BasicScheduler::resume_fiber(Fiber fiber) {
 }
 
 const StreamFD &BasicScheduler::std_in() {
-  return std_io->in;
+  if (!maybe_std_in) {
+    maybe_std_in = std::make_unique<StreamFD>(FD::steal_from_system(fd_io, 0));
+  }
+  return *maybe_std_in;
 }
 
 const StreamFD &BasicScheduler::std_out() {
-  return std_io->out;
+  if (!maybe_std_out) {
+    maybe_std_out = std::make_unique<StreamFD>(FD::steal_from_system(fd_io, 1));
+  }
+  return *maybe_std_out;
 }
 
 const StreamFD &BasicScheduler::std_err() {
-  return std_io->err;
+  if (!maybe_std_err) {
+    maybe_std_err = std::make_unique<StreamFD>(FD::steal_from_system(fd_io, 2));
+  }
+  return *maybe_std_err;
 }
 
 Future<void> BasicScheduler::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
-  auto [promise, future] = Contract<void>();
+  auto [promise, future] = make_contract<void>();
   auto task = [promise = std::move(promise)] mutable { std::move(promise).fulfill(); };
   pending_timed_tasks.emplace(time, std::move(task));
   return std::move(future);
@@ -95,7 +104,6 @@ void BasicScheduler::run() {
       }
 
       { // Otherwise block on I/O and wait until anything happens...
-        AIOXX_ASSUME(!pending_io_tasks.empty());
         auto deadline = pending_timed_tasks.empty() ? std::nullopt : std::optional{pending_timed_tasks.begin()->when};
         if (auto task = pending_io_tasks.poll(deadline))
           available_tasks.push(std::move(*task));
@@ -108,7 +116,18 @@ void BasicScheduler::run() {
 
 BasicScheduler::~BasicScheduler() {
   AIOXX_ASSUME(current_fiber == nullptr);
-  std::move(*std_io).release_to_system();
+  if (maybe_std_in) {
+    (void) std::move(*maybe_std_in).release_to_system();
+    maybe_std_in.reset();
+  }
+  if (maybe_std_out) {
+    (void) std::move(*maybe_std_out).release_to_system();
+    maybe_std_out.reset();
+  }
+  if (maybe_std_err) {
+    (void) std::move(*maybe_std_err).release_to_system();
+    maybe_std_err.reset();
+  }
 }
 
 } // namespace AIO

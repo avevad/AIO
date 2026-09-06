@@ -9,7 +9,6 @@
 #include <set>
 
 namespace AIO {
-struct StdIO;
 class StreamFD;
 class BasicScheduler {
 public:
@@ -111,7 +110,9 @@ private:
   Fiber current_fiber = nullptr;
 
   IO fd_io{*this};
-  std::unique_ptr<StdIO> std_io;
+  std::unique_ptr<StreamFD> maybe_std_in;
+  std::unique_ptr<StreamFD> maybe_std_out;
+  std::unique_ptr<StreamFD> maybe_std_err;
 };
 } // namespace AIO
 
@@ -126,7 +127,7 @@ namespace AIO {
 template<typename Functor, typename... Args>
 Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&fun, Args &&...args) {
   using Res = std::invoke_result_t<Functor, Args...>;
-  auto [promise, future] = Contract<Res>();
+  auto [promise, future] = make_contract<Res>();
   auto fiber = std::make_unique<TypedFiber<Res>>(
     std::move(promise),
     [this, fun = std::forward<Functor>(fun),
