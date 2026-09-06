@@ -32,6 +32,7 @@ namespace _impl {
     void bind_to(P &promise);
 
     [[nodiscard]] bool is_free() const;
+    [[nodiscard]] bool is_fulfilled() const;
 
     ~FutureBase();
 
@@ -108,6 +109,7 @@ namespace _impl {
 
     void set(ExpectedResult result) &&;
 
+    bool fulfilled = false;
     std::optional<Consumer> maybe_consumer = std::nullopt;
   };
 
@@ -268,6 +270,11 @@ namespace _impl {
   }
 
   template<FutureResult Res, typename Future, typename Promise>
+  bool FutureBase<Res, Future, Promise>::is_fulfilled() const {
+    return !Bond::is_alive() || Bond::get().fulfilled;
+  }
+
+  template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise>::~FutureBase() {
     AIOXX_ASSUME(is_free());
   }
@@ -424,7 +431,8 @@ namespace _impl {
 
   template<FutureResult Res, typename Promise, typename Future>
   PromiseBase<Res, Promise, Future>::PromiseBase(PromiseBase &&other) noexcept
-      : Bond(std::move(other)), maybe_consumer(std::move(other.maybe_consumer)) {
+      : Bond(std::move(other)), fulfilled(other.fulfilled), maybe_consumer(std::move(other.maybe_consumer)) {
+    other.fulfilled = false;
     other.maybe_consumer.reset();
   }
 
@@ -433,7 +441,9 @@ namespace _impl {
     AIOXX_ASSUME(is_free());
 
     Bond::operator=(std::move(other));
+    fulfilled = other.fulfilled;
     maybe_consumer = std::move(other.maybe_consumer);
+    other.fulfilled = false;
     other.maybe_consumer.reset();
 
     return *this;
@@ -480,6 +490,9 @@ namespace _impl {
   template<FutureResult Res, typename Promise, typename Future>
   void PromiseBase<Res, Promise, Future>::set(ExpectedResult result) && {
     AIOXX_ASSUME(Bond::is_initialized());
+    AIOXX_ASSUME(!fulfilled);
+
+    fulfilled = true;
 
     if (maybe_consumer.has_value()) {
       (*maybe_consumer)(std::move(result));

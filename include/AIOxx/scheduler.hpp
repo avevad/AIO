@@ -93,12 +93,10 @@ private:
     Task what;
   };
 
-  // TODO: better startup mechanism
+  // TODO: separate scheduler interface from its management function(s)
   template<typename MainFunctor>
   friend void run_in_new(MainFunctor &&main);
-
   void run();
-  void stop();
 
   void resume_fiber(Fiber fiber);
 
@@ -106,7 +104,6 @@ private:
   std::multiset<Timer> pending_timed_tasks = {};
   IOQueue pending_io_tasks = {};
 
-  bool stopped = false;
   Fiber current_fiber = nullptr;
 
   IO fd_io{*this};
@@ -228,13 +225,15 @@ template<typename MainFunctor>
 void run_in_new(MainFunctor &&main) {
   auto sched = std::make_unique<BasicScheduler>();
 
-  auto main_executed = sched->async([sched = sched.get(), main = std::forward<MainFunctor>(main)] { main(sched); });
-  auto exception_caught = sched->async([](auto err) { panic("unhandled exception", err); });
-  auto sched_stopped = sched->async([sched = sched.get()] { sched->stop(); });
-
-  main_executed().except_any(exception_caught).then(sched_stopped).detach();
+  auto run_main = sched->async([sched = sched.get(), main = std::forward<MainFunctor>(main)] { main(sched); });
+  auto catch_all = sched->async([](auto err) { panic("unhandled exception", err); });
+  auto completed = run_main().except_any(catch_all);
 
   sched->run();
+  if (!completed.is_fulfilled()) {
+    panic("deadlock detected");
+  }
+  std::move(completed).detach();
 }
 
 } // namespace AIO
