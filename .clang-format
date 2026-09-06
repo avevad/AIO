@@ -44,6 +44,7 @@ MacroBlockBegin: ''
 MacroBlockEnd: ''
 MaxEmptyLinesToKeep: 2
 NamespaceIndentation: Inner
+PenaltyIndentedWhitespace: 10
 SpaceAfterCStyleCast: true
 SpaceAfterTemplateKeyword: false
 SpaceInEmptyParentheses: false

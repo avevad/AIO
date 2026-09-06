@@ -208,15 +208,16 @@ TEST(Future, ExceptAny) {
   bool any = false;
   int got = 0;
 
-  auto f = std::move(c.future)
-             .except<std::runtime_error>([&](std::runtime_error &) {
-               typed = true;
-               return ok(1);
-             })
-             .except_any([&](std::exception_ptr) {
-               any = true;
-               return ok(2);
-             });
+  auto f =
+    std::move(c.future)
+      .except<std::runtime_error>([&](std::runtime_error &) {
+        typed = true;
+        return ok(1);
+      })
+      .except_any([&](std::exception_ptr) {
+        any = true;
+        return ok(2);
+      });
 
   auto f2 = std::move(f).map_result([&](int x) {
     got = x;
@@ -234,12 +235,13 @@ TEST(Future, FunctorThrows) {
   Contract<int> c;
   bool handled = false;
 
-  auto f = std::move(c.future).map_result(
-                                [](int) -> int { throw std::runtime_error("boom"); }
-  ).except_any([&](std::exception_ptr) {
-    handled = true;
-    return ok(7);
-  });
+  auto f =
+    std::move(c.future)
+      .map_result([](int) -> int { throw std::runtime_error("boom"); })
+      .except_any([&](std::exception_ptr) {
+        handled = true;
+        return ok(7);
+      });
   std::move(c.promise).fulfill(1);
   std::move(f).detach();
   EXPECT_TRUE(handled);
@@ -252,15 +254,16 @@ TEST(Future, DetachOnError) {
 
 TEST(Future, ErrorShortCircuits) {
   bool called = false;
-  auto f = err<int>(std::make_exception_ptr(std::runtime_error("x")))
-             .then([&](int) {
-               called = true;
-               return ok(1);
-             })
-             .map_result([&](int) {
-               called = true;
-               return 2;
-             });
+  auto f =
+    err<int>(std::make_exception_ptr(std::runtime_error("x")))
+      .then([&](int) {
+        called = true;
+        return ok(1);
+      })
+      .map_result([&](int) {
+        called = true;
+        return 2;
+      });
   std::move(f).detach();
   EXPECT_FALSE(called);
 }
