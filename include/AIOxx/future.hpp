@@ -17,8 +17,8 @@ namespace _impl {
   class PromiseBase;
 
   template<FutureResult Res, typename Future, typename Promise>
-  class FutureBase : public Bond<FutureBase<Res, Future, Promise>, PromiseBase<Res, Promise, Future>> {
-    using Bond = Bond<FutureBase, PromiseBase<Res, Promise, Future>>;
+  class FutureBase : public Bond<FutureBase<Res, Future, Promise>, PromiseBase<Res, Promise, Future>, false> {
+    using Bond = Bond<FutureBase, PromiseBase<Res, Promise, Future>, false>;
 
   public:
     FutureBase() = default;
@@ -32,6 +32,7 @@ namespace _impl {
     void bind_to(P &promise);
 
     [[nodiscard]] bool is_free() const;
+    [[nodiscard]] bool is_fulfilled() const;
 
     ~FutureBase();
 
@@ -70,8 +71,8 @@ namespace _impl {
   };
 
   template<FutureResult Res, typename Promise, typename Future>
-  class PromiseBase : public Bond<PromiseBase<Res, Promise, Future>, FutureBase<Res, Future, Promise>> {
-    using Bond = Bond<PromiseBase, FutureBase<Res, Future, Promise>>;
+  class PromiseBase : public Bond<PromiseBase<Res, Promise, Future>, FutureBase<Res, Future, Promise>, true> {
+    using Bond = Bond<PromiseBase, FutureBase<Res, Future, Promise>, true>;
 
   public:
     PromiseBase() = default;
@@ -108,6 +109,7 @@ namespace _impl {
 
     void set(ExpectedResult result) &&;
 
+    bool fulfilled = false;
     std::optional<Consumer> maybe_consumer = std::nullopt;
   };
 
@@ -212,13 +214,18 @@ public:
 };
 
 template<typename Res>
-class Contract {
-public:
-  Contract();
+[[nodiscard]] auto make_contract() {
+  struct Contract {
+    Promise<Res> promise = {};
+    Future<Res> future = {};
 
-  Promise<Res> promise = {};
-  Future<Res> future = {};
-};
+    Contract() {
+      promise.bind_to(future);
+    }
+  };
+
+  return Contract{};
+}
 } // namespace AIO
 
 
@@ -263,6 +270,11 @@ namespace _impl {
   }
 
   template<FutureResult Res, typename Future, typename Promise>
+  bool FutureBase<Res, Future, Promise>::is_fulfilled() const {
+    return !Bond::is_alive() || Bond::get().fulfilled;
+  }
+
+  template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise>::~FutureBase() {
     AIOXX_ASSUME(is_free());
   }
@@ -272,7 +284,7 @@ namespace _impl {
   auto FutureBase<Res, Future, Promise>::then(AsyncFunctor &&functor) && {
     using MappedFuture = Future::template Mapped<Res1>;
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
-    auto [promise, future] = Contract<Res1>();
+    auto [promise, future] = make_contract<Res1>();
     std::move(*this).consume_with(
       [promise = std::move(promise), fun = std::forward<AsyncFunctor>(functor)](ExpectedResult result) mutable {
         if (result.is_ok()) {
@@ -295,7 +307,7 @@ namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   template<typename Exception, typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except(AsyncHandler &&handler) && {
-    auto [promise, future] = Contract<Res>();
+    auto [promise, future] = make_contract<Res>();
     std::move(*this).consume_with(
       [promise = std::move(promise), handler = std::forward<AsyncHandler>(handler)](ExpectedResult result) mutable {
         if (!result.is_ok()) {
@@ -324,7 +336,7 @@ namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   template<typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except_any(AsyncHandler &&handler) && {
-    auto [promise, future] = Contract<Res>();
+    auto [promise, future] = make_contract<Res>();
     std::move(*this).consume_with(
       [promise = std::move(promise), handler = std::forward<AsyncHandler>(handler)](ExpectedResult result) mutable {
         if (!result.is_ok()) {
@@ -352,7 +364,7 @@ namespace _impl {
   template<typename Functor, typename Res1>
   auto FutureBase<Res, Future, Promise>::map_result(Functor &&functor) && {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
-    auto [promise, future] = Contract<Res1>();
+    auto [promise, future] = make_contract<Res1>();
     std::move(*this).consume_with(
       [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
         if (result.is_ok()) {
@@ -373,7 +385,7 @@ namespace _impl {
   template<typename Functor, typename Res1>
   auto FutureBase<Res, Future, Promise>::map_expected(Functor &&functor) && {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
-    auto [promise, future] = Contract<Res1>();
+    auto [promise, future] = make_contract<Res1>();
     std::move(*this).consume_with(
       [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
         try {
@@ -419,7 +431,8 @@ namespace _impl {
 
   template<FutureResult Res, typename Promise, typename Future>
   PromiseBase<Res, Promise, Future>::PromiseBase(PromiseBase &&other) noexcept
-      : Bond(std::move(other)), maybe_consumer(std::move(other.maybe_consumer)) {
+      : Bond(std::move(other)), fulfilled(other.fulfilled), maybe_consumer(std::move(other.maybe_consumer)) {
+    other.fulfilled = false;
     other.maybe_consumer.reset();
   }
 
@@ -428,7 +441,9 @@ namespace _impl {
     AIOXX_ASSUME(is_free());
 
     Bond::operator=(std::move(other));
+    fulfilled = other.fulfilled;
     maybe_consumer = std::move(other.maybe_consumer);
+    other.fulfilled = false;
     other.maybe_consumer.reset();
 
     return *this;
@@ -475,6 +490,9 @@ namespace _impl {
   template<FutureResult Res, typename Promise, typename Future>
   void PromiseBase<Res, Promise, Future>::set(ExpectedResult result) && {
     AIOXX_ASSUME(Bond::is_initialized());
+    AIOXX_ASSUME(!fulfilled);
+
+    fulfilled = true;
 
     if (maybe_consumer.has_value()) {
       (*maybe_consumer)(std::move(result));
@@ -600,11 +618,6 @@ Future<void>::Mapped<Res1> Future<void>::map_expected(Functor &&functor) && {
       return functor(std::move(expected).transform([](auto) {}));
     });
   }
-}
-
-template<typename Res>
-Contract<Res>::Contract() {
-  promise.bind_to(future);
 }
 
 inline Future<void>::Future(Future<_impl::Void> &&other) noexcept : FutureBase(std::move(other)) {
