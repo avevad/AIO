@@ -17,8 +17,8 @@ namespace _impl {
   class PromiseBase;
 
   template<FutureResult Res, typename Future, typename Promise>
-  class FutureBase : public Bond<FutureBase<Res, Future, Promise>, PromiseBase<Res, Promise, Future>> {
-    using Bond = Bond<FutureBase, PromiseBase<Res, Promise, Future>>;
+  class FutureBase : public Bond<FutureBase<Res, Future, Promise>, PromiseBase<Res, Promise, Future>, false> {
+    using Bond = Bond<FutureBase, PromiseBase<Res, Promise, Future>, false>;
 
   public:
     FutureBase() = default;
@@ -70,8 +70,8 @@ namespace _impl {
   };
 
   template<FutureResult Res, typename Promise, typename Future>
-  class PromiseBase : public Bond<PromiseBase<Res, Promise, Future>, FutureBase<Res, Future, Promise>> {
-    using Bond = Bond<PromiseBase, FutureBase<Res, Future, Promise>>;
+  class PromiseBase : public Bond<PromiseBase<Res, Promise, Future>, FutureBase<Res, Future, Promise>, true> {
+    using Bond = Bond<PromiseBase, FutureBase<Res, Future, Promise>, true>;
 
   public:
     PromiseBase() = default;
