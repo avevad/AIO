@@ -110,29 +110,32 @@ template<typename Functor, typename... Args>
 Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&fun, Args &&...args) {
   using Res = std::invoke_result_t<Functor, Args...>;
   auto [promise, future] = Contract<Res>();
-  auto fiber = std::make_unique<Fiber>([this, fun = std::forward<Functor>(fun),
-                                        args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
-                                        promise = std::move(promise)] mutable {
-    auto invoker = [&]<typename... A>(A &&...a) mutable { return std::invoke(std::move(fun), std::forward<A>(a)...); };
-    try {
-      if constexpr (!std::is_void_v<Res>) {
-        std::move(promise).fulfill(std::apply(invoker, std::move(args)));
-      } else {
-        std::apply(invoker, std::move(args));
-        std::move(promise).fulfill();
+  auto fiber = std::make_unique<Fiber>(
+    [this, fun = std::forward<Functor>(fun), args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
+     promise = std::move(promise)] mutable {
+      auto invoker = [&]<typename... A>(A &&...a) mutable {
+        return std::invoke(std::move(fun), std::forward<A>(a)...);
+      };
+      try {
+        if constexpr (!std::is_void_v<Res>) {
+          std::move(promise).fulfill(std::apply(invoker, std::move(args)));
+        } else {
+          std::apply(invoker, std::move(args));
+          std::move(promise).fulfill();
+        }
+        /*
+      TODO: with proper implementation of Future cancelling this should look like this:
+      } catch (const _impl::CoroutineKiller &) {*/
+      } catch (...) {
+        std::move(promise).fail_any(std::current_exception());
       }
-      /*
-    TODO: with proper implementation of Future cancelling this should look like this:
-    } catch (const _impl::CoroutineKiller &) {*/
-    } catch (...) {
-      std::move(promise).fail_any(std::current_exception());
-    }
-    AIOXX_ASSUME(current_fiber != nullptr);
+      AIOXX_ASSUME(current_fiber != nullptr);
 
-    // It is fiber's responsibility to deschedule itself, but we cannot destroy it right here as it is still alive.
-    // Instead, we deschedule the fiber and schedule a task to dispose of the fiber after its completion.
-    available_tasks.push([fiber = std::move(current_fiber)] mutable { fiber.reset(); });
-  });
+      // It is fiber's responsibility to deschedule itself, but we cannot destroy it right here as it is still alive.
+      // Instead, we deschedule the fiber and schedule a task to dispose of the fiber after its completion.
+      available_tasks.push([fiber = std::move(current_fiber)] mutable { fiber.reset(); });
+    }
+  );
   available_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
   return std::move(future);
 }

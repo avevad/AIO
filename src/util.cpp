@@ -21,12 +21,12 @@ std::string make_exception_message(const std::string &what, std::exception_ptr e
 } // namespace
 
 void AIO::panic(const std::string &what, const std::source_location where) {
-  std::cerr << std::string(where.file_name()) + ":" + std::to_string(where.line()) + ":" +
-                 std::to_string(where.column()) +
-                 ": "
-                 "function ‘" +
-                 where.function_name() + "’: "
-            << what << std::endl;
+  std::cerr
+    << std::string(where.file_name()) + ":" + std::to_string(where.line()) + ":" + std::to_string(where.column()) +
+         ": "
+         "function ‘" +
+         where.function_name() + "’: "
+    << what << std::endl;
   std::abort();
 }
 
@@ -36,15 +36,15 @@ void AIO::panic(const std::string &what, std::exception_ptr err, const std::sour
 
 void AIO::warning(const std::string &what, const std::source_location where) {
 #ifdef AIOXX_DEBUG
-  std::cerr << std::string(where.file_name()) + ":" + std::to_string(where.line()) + ":" +
-                 std::to_string(where.column()) +
-                 ": "
-                 "function ‘" +
-                 where.function_name() +
-                 "’: "
-                 "runtime warning: " +
-                 what
-            << std::endl;
+  std::cerr
+    << std::string(where.file_name()) + ":" + std::to_string(where.line()) + ":" + std::to_string(where.column()) +
+         ": "
+         "function ‘" +
+         where.function_name() +
+         "’: "
+         "runtime warning: " +
+         what
+    << std::endl;
 #else
   (void) what;
   (void) where;

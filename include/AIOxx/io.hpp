@@ -19,7 +19,7 @@ public:
     Handle &operator=(Handle &&other) noexcept;
 
     Handle(const Handle &) = delete;
-    Handle& operator=(const Handle &) = delete;
+    Handle &operator=(const Handle &) = delete;
 
     Future<void> ready_in();
     Future<void> ready_out();

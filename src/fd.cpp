@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "AIOxx/io.hpp"
 #include "AIOxx/scheduler.hpp"
