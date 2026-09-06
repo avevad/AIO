@@ -44,7 +44,6 @@ MacroBlockBegin: ''
 MacroBlockEnd: ''
 MaxEmptyLinesToKeep: 2
 NamespaceIndentation: Inner
-# Prefer breaking long expressions over deeply indenting chained calls.
 PenaltyIndentedWhitespace: 10
 SpaceAfterCStyleCast: true
 SpaceAfterTemplateKeyword: false
