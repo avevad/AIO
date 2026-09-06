@@ -67,8 +67,25 @@ public:
   };
 
 private:
-  using Fiber = Coroutine<void()>;
-  using FiberPtr = std::unique_ptr<Fiber>;
+  struct BaseFiber {
+    Coroutine<void()> coro;
+    template<typename... CoroArgs>
+    explicit BaseFiber(CoroArgs &&...args);
+
+    virtual bool is_cancelled() = 0;
+    virtual ~BaseFiber() = default;
+  };
+
+  template<typename Res>
+  struct TypedFiber : BaseFiber {
+    Promise<Res> promise;
+    template<typename... CoroArgs>
+    explicit TypedFiber(Promise<Res> promise, CoroArgs &&...args);
+
+    bool is_cancelled() override;
+  };
+
+  using Fiber = std::unique_ptr<BaseFiber>;
   using Task = std::move_only_function<void()>;
   struct Timer {
     bool operator<(const Timer &timer) const;
@@ -84,14 +101,14 @@ private:
   void run();
   void stop();
 
-  void resume_fiber(FiberPtr fiber);
+  void resume_fiber(Fiber fiber);
 
   std::queue<Task> available_tasks = {};
   std::multiset<Timer> pending_timed_tasks = {};
   IOQueue pending_io_tasks = {};
 
   bool stopped = false;
-  FiberPtr current_fiber = nullptr;
+  Fiber current_fiber = nullptr;
 
   IO fd_io{*this};
   std::unique_ptr<StdIO> std_io;
@@ -110,12 +127,14 @@ template<typename Functor, typename... Args>
 Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&fun, Args &&...args) {
   using Res = std::invoke_result_t<Functor, Args...>;
   auto [promise, future] = Contract<Res>();
-  auto fiber = std::make_unique<Fiber>(
-    [this, fun = std::forward<Functor>(fun), args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
-     promise = std::move(promise)] mutable {
+  auto fiber = std::make_unique<TypedFiber<Res>>(
+    std::move(promise),
+    [this, fun = std::forward<Functor>(fun),
+     args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...)] mutable {
       auto invoker = [&]<typename... A>(A &&...a) mutable {
         return std::invoke(std::move(fun), std::forward<A>(a)...);
       };
+      auto &promise = static_cast<TypedFiber<Res> *>(current_fiber.get())->promise;
       try {
         if constexpr (!std::is_void_v<Res>) {
           std::move(promise).fulfill(std::apply(invoker, std::move(args)));
@@ -152,7 +171,7 @@ template<typename Res>
   AIOXX_ASSUME(current_fiber != nullptr);
 
   // See comments below.
-  Fiber &fiber = *current_fiber;
+  auto *fiber = current_fiber.get();
 
   Expected<Res> expected = std::unexpected<std::exception_ptr>(nullptr);
   std::move(future)
@@ -169,7 +188,7 @@ template<typename Res>
   // Future consumer will live until executed once and the fiber will be held at least to this point.
   // Then the fiber will be moved into queue and by that means will live until resumed.
   // However, the consumer can be executed immediately, so TODO -- examine fiber lifetime more carefully at this moment:
-  fiber.yield();
+  fiber->coro.yield();
 
   if (!expected.has_value())
     std::rethrow_exception(expected.error());
@@ -178,6 +197,21 @@ template<typename Res>
     return std::move(*expected);
   else
     return;
+}
+
+template<typename... CoroArgs>
+BasicScheduler::BaseFiber::BaseFiber(CoroArgs &&...args) : coro(std::forward<CoroArgs>(args)...) {
+}
+
+template<typename Res>
+template<typename... CoroArgs>
+BasicScheduler::TypedFiber<Res>::TypedFiber(Promise<Res> promise, CoroArgs &&...args)
+    : BaseFiber(std::forward<CoroArgs>(args)...), promise(std::move(promise)) {
+}
+
+template<typename Res>
+bool BasicScheduler::TypedFiber<Res>::is_cancelled() {
+  return promise.is_free();
 }
 
 template<typename Rep, typename Period>
