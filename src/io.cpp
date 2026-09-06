@@ -3,6 +3,7 @@
 #include "AIOxx/fd.hpp"
 #include "AIOxx/util.hpp"
 
+#include <cerrno>
 #include <cstring>
 #include <sys/epoll.h>
 #include <unistd.h>
@@ -133,18 +134,26 @@ std::optional<IOQueue::Task> IOQueue::poll(std::optional<std::chrono::time_point
       panic(strerror(errno));
     handle->epoll_events = events;
   }
-  // Deduce the timeout value
-  int timeout_num = -1;
-  if (deadline.has_value()) {
-    auto now = std::chrono::steady_clock::now();
-    auto timeout = *deadline < now ? std::chrono::steady_clock::duration{0} : *deadline - now;
-    timeout_num = std::chrono::duration_cast<std::chrono::duration<int, std::milli>>(timeout).count();
-  }
   // Select one event from epoll
   epoll_event ep_evt{};
-  int result = epoll_wait(ep_fd, &ep_evt, 1, timeout_num);
-  if (result < 0)
-    panic(strerror(errno));
+  int result;
+  while (true) {
+    // Recompute the remaining timeout after interruptions.
+    int timeout_num = -1;
+    if (deadline.has_value()) {
+      auto now = std::chrono::steady_clock::now();
+      auto timeout = *deadline < now ? std::chrono::steady_clock::duration{0} : *deadline - now;
+      // TODO: clamp to INT_MAX and round positive fractional milliseconds up.
+      timeout_num = std::chrono::duration_cast<std::chrono::duration<int, std::milli>>(timeout).count();
+    }
+    result = epoll_wait(ep_fd, &ep_evt, 1, timeout_num);
+    if (result >= 0)
+      break;
+    if (errno != EINTR)
+      panic(strerror(errno));
+    if (deadline && std::chrono::steady_clock::now() >= *deadline)
+      return std::nullopt;
+  }
   if (result) {
     // Multiplex the event to corresponding consumer promise(s)
     auto *handle = static_cast<Handle *>(ep_evt.data.ptr);
