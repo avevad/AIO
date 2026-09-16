@@ -563,8 +563,6 @@ namespace _impl {
         if (!result.is_ok()) {
           try {
             std::rethrow_exception(result.move_as_err());
-          } catch (const CoroutineKiller &) {
-            // TODO: this shouldn't be here. See `BasicEventLoop::fiber()`.
           } catch (...) {
             warning("unhandled error in detached future", std::current_exception());
           }

@@ -224,3 +224,36 @@ TEST(AIO, Hangup) {
     std::move(r).close();
   });
 }
+
+TEST(AIO, CancelFiberBeforeStart) {
+  bool started = false;
+  run_in_new([&](BasicScheduler *sched) {
+    auto future = sched->fiber([&] { started = true; });
+    std::move(future).cancel();
+  });
+  EXPECT_FALSE(started);
+}
+
+TEST(AIO, CancelYieldedFiber) {
+  bool started = false;
+  bool continued = false;
+  bool unwound = false;
+  run_in_new([&](BasicScheduler *sched) {
+    auto future = sched->fiber([&, sched] {
+      struct Guard {
+        bool &unwound;
+        ~Guard() {
+          unwound = true;
+        }
+      } guard{unwound};
+      started = true;
+      sched->yield();
+      continued = true;
+    });
+    sched->yield();
+    EXPECT_TRUE(started);
+    std::move(future).cancel();
+  });
+  EXPECT_FALSE(continued);
+  EXPECT_TRUE(unwound);
+}

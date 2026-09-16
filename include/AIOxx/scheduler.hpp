@@ -141,9 +141,6 @@ Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&f
           std::apply(invoker, std::move(args));
           std::move(promise).fulfill();
         }
-        /*
-      TODO: with proper implementation of Future cancelling this should look like this:
-      } catch (const _impl::CoroutineKiller &) {*/
       } catch (...) {
         std::move(promise).fail_any(std::current_exception());
       }
@@ -173,21 +170,25 @@ template<typename Res>
   auto *fiber = current_fiber.get();
 
   Expected<Res> expected = std::unexpected<std::exception_ptr>(nullptr);
-  std::move(future)
-    .map_expected(
+  auto continuation = std::move(future).map_expected(
       [this, fiber = std::move(current_fiber), &expected](std::expected<Res, std::exception_ptr> expected1) mutable
         -> std::expected<void, std::exception_ptr> {
         expected = std::move(expected1);
         available_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
         return {};
       }
-    )
-    .detach();
+    );
 
   // Future consumer will live until executed once and the fiber will be held at least to this point.
   // Then the fiber will be moved into queue and by that means will live until resumed.
   // However, the consumer can be executed immediately, so TODO -- examine fiber lifetime more carefully at this moment:
-  fiber->coro.yield();
+  try {
+    fiber->coro.yield();
+  } catch (const _impl::CoroutineKiller &) {
+    std::move(continuation).cancel();
+    throw;
+  }
+  std::move(continuation).detach();
 
   if (!expected.has_value())
     std::rethrow_exception(expected.error());

@@ -38,6 +38,10 @@ BasicScheduler::IO &BasicScheduler::io() {
 
 void BasicScheduler::resume_fiber(Fiber fiber) {
   AIOXX_ASSUME(current_fiber == nullptr);
+  if (fiber->is_cancelled()) {
+    fiber->coro.kill();
+    return;
+  }
   current_fiber = std::move(fiber);
   current_fiber->coro.resume();
   AIOXX_ASSUME(current_fiber == nullptr);
