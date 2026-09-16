@@ -2,6 +2,7 @@
 
 #include "AIOxx/future.hpp"
 
+#include <stdexcept>
 #include <string>
 
 using namespace AIO;
@@ -10,22 +11,22 @@ namespace {
 
 template<typename T>
 Future<T> ok(T v) {
-  Contract<T> c;
-  std::move(c.promise).fulfill(std::move(v));
-  return std::move(c.future);
+  auto [promise, future] = make_contract<T>();
+  std::move(promise).fulfill(std::move(v));
+  return std::move(future);
 }
 
 Future<void> ok() {
-  Contract<void> c;
-  std::move(c.promise).fulfill();
-  return std::move(c.future);
+  auto [promise, future] = make_contract<void>();
+  std::move(promise).fulfill();
+  return std::move(future);
 }
 
 template<typename T>
 Future<T> err(std::exception_ptr e) {
-  Contract<T> c;
-  std::move(c.promise).fail_any(std::move(e));
-  return std::move(c.future);
+  auto [promise, future] = make_contract<T>();
+  std::move(promise).fail_any(std::move(e));
+  return std::move(future);
 }
 
 } // namespace
@@ -36,9 +37,9 @@ TEST(Future, DefaultAndMove) {
   (void) f0;
   (void) p0;
 
-  Contract<int> c;
-  Future<int> f = std::move(c.future);
-  Promise<int> p = std::move(c.promise);
+  auto [promise, future] = make_contract<int>();
+  Future<int> f = std::move(future);
+  Promise<int> p = std::move(promise);
 
   Future<int> f2;
   Promise<int> p2;
@@ -56,24 +57,24 @@ TEST(Future, DefaultAndMove) {
 }
 
 TEST(Future, ConsumerBeforeResult) {
-  Contract<int> c;
+  auto [promise, future] = make_contract<int>();
   int got = 0;
-  auto f = std::move(c.future).map_result([](int x) { return x * 2; });
+  auto f = std::move(future).map_result([](int x) { return x * 2; });
   auto f2 = std::move(f).map_expected([&](Expected<int> e) {
     got = e.value();
     return e;
   });
-  std::move(c.promise).fulfill(3);
+  std::move(promise).fulfill(3);
   std::move(f2).detach();
   EXPECT_EQ(got, 6);
 }
 
 TEST(Future, ResultBeforeConsumer) {
-  Contract<int> c;
-  std::move(c.promise).fulfill(4);
+  auto [promise, future] = make_contract<int>();
+  std::move(promise).fulfill(4);
 
   int got = 0;
-  auto f = std::move(c.future).map_result([](int x) { return x + 1; });
+  auto f = std::move(future).map_result([](int x) { return x + 1; });
   auto f2 = std::move(f).map_expected([&](Expected<int> e) {
     got = e.value();
     return e;
@@ -83,58 +84,58 @@ TEST(Future, ResultBeforeConsumer) {
 }
 
 TEST(Future, MapToVoid) {
-  Contract<int> c;
+  auto [promise, future] = make_contract<int>();
   bool called = false;
-  auto f = std::move(c.future).map_result([&](int) { called = true; });
-  std::move(c.promise).fulfill(1);
+  auto f = std::move(future).map_result([&](int) { called = true; });
+  std::move(promise).fulfill(1);
   std::move(f).detach();
   EXPECT_TRUE(called);
 }
 
 TEST(Future, MapExpectedToVoid) {
-  Contract<int> c;
+  auto [promise, future] = make_contract<int>();
   bool called = false;
-  auto f = std::move(c.future).map_expected([&](Expected<int>) -> std::expected<void, std::exception_ptr> {
+  auto f = std::move(future).map_expected([&](Expected<int>) -> std::expected<void, std::exception_ptr> {
     called = true;
     return {};
   });
-  std::move(c.promise).fulfill(1);
+  std::move(promise).fulfill(1);
   std::move(f).detach();
   EXPECT_TRUE(called);
 }
 
 TEST(Future, ThenNonVoid) {
-  Contract<int> c;
+  auto [promise, future] = make_contract<int>();
   int got = 0;
-  auto f = std::move(c.future).then([](int x) { return ok(x + 1); });
+  auto f = std::move(future).then([](int x) { return ok(x + 1); });
   auto f2 = std::move(f).map_result([&](int x) {
     got = x;
     return x;
   });
-  std::move(c.promise).fulfill(5);
+  std::move(promise).fulfill(5);
   std::move(f2).detach();
   EXPECT_EQ(got, 6);
 }
 
 TEST(Future, ThenVoid) {
-  Contract<int> c;
+  auto [promise, future] = make_contract<int>();
   bool called = false;
-  auto f = std::move(c.future).then([&](int) {
+  auto f = std::move(future).then([&](int) {
     called = true;
     return ok();
   });
-  std::move(c.promise).fulfill(1);
+  std::move(promise).fulfill(1);
   std::move(f).detach();
   EXPECT_TRUE(called);
 }
 
 TEST(Future, VoidThenAndMapExpected) {
-  Contract<void> c;
+  auto [promise, future] = make_contract<void>();
   bool then_called = false;
   int got = 0;
 
   // then: void -> int
-  auto f = std::move(c.future).then([&] {
+  auto f = std::move(future).then([&] {
     then_called = true;
     return ok(4);
   });
@@ -142,7 +143,7 @@ TEST(Future, VoidThenAndMapExpected) {
     got = x;
     return x;
   });
-  std::move(c.promise).fulfill();
+  std::move(promise).fulfill();
   std::move(f2).detach();
   EXPECT_TRUE(then_called);
   EXPECT_EQ(got, 4);
@@ -184,11 +185,11 @@ TEST(Future, ThenOnError) {
 }
 
 TEST(Future, ExceptTyped) {
-  Contract<int> c;
+  auto [promise, future] = make_contract<int>();
   bool handled = false;
   int got = 0;
 
-  auto f = std::move(c.future).except<std::runtime_error>([&](std::runtime_error &) {
+  auto f = std::move(future).except<std::runtime_error>([&](std::runtime_error &) {
     handled = true;
     return ok(9);
   });
@@ -196,20 +197,20 @@ TEST(Future, ExceptTyped) {
     got = x;
     return x;
   });
-  std::move(c.promise).fail(std::runtime_error("x"));
+  std::move(promise).fail(std::runtime_error("x"));
   std::move(f2).detach();
   EXPECT_TRUE(handled);
   EXPECT_EQ(got, 9);
 }
 
 TEST(Future, ExceptAny) {
-  Contract<int> c;
+  auto [promise, future] = make_contract<int>();
   bool typed = false;
   bool any = false;
   int got = 0;
 
   auto f =
-    std::move(c.future)
+    std::move(future)
       .except<std::runtime_error>([&](std::runtime_error &) {
         typed = true;
         return ok(1);
@@ -223,7 +224,7 @@ TEST(Future, ExceptAny) {
     got = x;
     return x;
   });
-  std::move(c.promise).fail(std::logic_error("y"));
+  std::move(promise).fail(std::logic_error("y"));
   std::move(f2).detach();
 
   EXPECT_FALSE(typed);
@@ -232,17 +233,16 @@ TEST(Future, ExceptAny) {
 }
 
 TEST(Future, FunctorThrows) {
-  Contract<int> c;
+  auto [promise, future] = make_contract<int>();
   bool handled = false;
 
-  auto f =
-    std::move(c.future)
-      .map_result([](int) -> int { throw std::runtime_error("boom"); })
-      .except_any([&](std::exception_ptr) {
-        handled = true;
-        return ok(7);
-      });
-  std::move(c.promise).fulfill(1);
+  auto f = std::move(future).map_result(
+                              [](int) -> int { throw std::runtime_error("boom"); }
+  ).except_any([&](std::exception_ptr) {
+    handled = true;
+    return ok(7);
+  });
+  std::move(promise).fulfill(1);
   std::move(f).detach();
   EXPECT_TRUE(handled);
 }
@@ -274,4 +274,90 @@ TEST(Future, ExceptAnyHandlerThrows) {
       throw std::runtime_error("handler");
     });
   std::move(f).detach();
+}
+
+TEST(Future, CancelMappedChain) {
+  auto [promise, future] = make_contract<int>();
+  bool cancelled = false;
+  bool called = false;
+  promise.on_hangup([&] { cancelled = true; });
+
+  auto f =
+    std::move(future)
+      .map_result([&](int x) {
+        called = true;
+        return x + 1;
+      })
+      .map_expected([&](Expected<int> result) {
+        called = true;
+        return result;
+      });
+  std::move(f).cancel();
+  EXPECT_TRUE(cancelled);
+  std::move(promise).fulfill(1);
+  EXPECT_FALSE(called);
+}
+
+TEST(Future, CancelThenNestedFuture) {
+  auto [promise, future] = make_contract<void>();
+  bool cancelled = false;
+  promise.on_hangup([&] { cancelled = true; });
+
+  auto f = ok(1).then([&](int) { return std::move(future); });
+  std::move(f).cancel();
+  EXPECT_TRUE(cancelled);
+  std::move(promise).fulfill();
+}
+
+TEST(Future, CancelInsideThenCallback) {
+  auto [promise, future] = make_contract<int>();
+  auto [promise1, future1] = make_contract<void>();
+  bool cancelled = false;
+  promise1.on_hangup([&] { cancelled = true; });
+
+  Future<void> f;
+  f = std::move(future).then([&](int) {
+    std::move(f).cancel();
+    return std::move(future1);
+  });
+  std::move(promise).fulfill(1);
+  EXPECT_TRUE(cancelled);
+  std::move(promise1).fulfill();
+}
+
+TEST(Future, CancelExceptionRecoveryChain) {
+  auto [promise, future] = make_contract<int>();
+  auto [promise1, future1] = make_contract<int>();
+  bool cancelled = false;
+  bool handled = false;
+  bool any_called = false;
+  promise1.on_hangup([&] { cancelled = true; });
+
+  auto f =
+    std::move(future)
+      .except<std::runtime_error>([&](std::runtime_error &) {
+        handled = true;
+        return std::move(future1);
+      })
+      .except_any([&](std::exception_ptr) {
+        any_called = true;
+        return ok(2);
+      });
+  std::move(promise).fail(std::runtime_error("x"));
+  EXPECT_TRUE(handled);
+  std::move(f).cancel();
+  EXPECT_TRUE(cancelled);
+  std::move(promise1).fail(std::runtime_error("late"));
+  EXPECT_FALSE(any_called);
+}
+
+TEST(Future, CancelAfterThenCompletion) {
+  bool called = false;
+  auto f = ok(1).then([&](int) {
+    called = true;
+    return ok();
+  });
+  EXPECT_TRUE(called);
+  EXPECT_TRUE(f.is_fulfilled());
+  std::move(f).cancel();
 }

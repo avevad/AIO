@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 
 #include "future.hpp"
@@ -21,8 +22,10 @@ public:
     Handle(const Handle &) = delete;
     Handle &operator=(const Handle &) = delete;
 
-    Future<void> ready_in();
-    Future<void> ready_out();
+    enum Direction { In, Out };
+
+    template<Direction direction>
+    Future<void> ready();
 
     ~Handle();
 
@@ -32,9 +35,19 @@ public:
     SystemFD fd;
     IOQueue *queue = nullptr;
 
+    struct Pending {
+      Promise<void> promise;
+      BoundStorageMaster<Handle *> handle;
+    };
+
     // TODO: thread-safety.
-    std::optional<Promise<void>> prom_in = std::nullopt, prom_out = std::nullopt;
-    std::optional<Future<void>> fut_in = std::nullopt, fut_out = std::nullopt;
+    std::optional<Pending> prom_in = std::nullopt, prom_out = std::nullopt;
+
+    // TODO: platform independence.
+    uint32_t epoll_events = 0;
+    // Intrusive list of scheduled IOQueue updates
+    Handle *next_update = nullptr;
+    Handle **prev_ptr = nullptr;
   };
 
   IOQueue();
@@ -52,7 +65,11 @@ public:
   ~IOQueue();
 
 private:
+  void schedule_update(Handle *handle);
+  void remove_update(Handle *handle);
+
   int ep_fd;
-  size_t size = 0;
+  size_t pending_consumers = 0;
+  Handle *updates = nullptr;
 };
 } // namespace AIO

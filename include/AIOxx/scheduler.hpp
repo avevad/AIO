@@ -9,7 +9,6 @@
 #include <set>
 
 namespace AIO {
-struct StdIO;
 class StreamFD;
 class BasicScheduler {
 public:
@@ -67,34 +66,51 @@ public:
   };
 
 private:
-  using Fiber = Coroutine<void()>;
-  using FiberPtr = std::unique_ptr<Fiber>;
+  struct BaseFiber {
+    Coroutine<void()> coro;
+    template<typename... CoroArgs>
+    explicit BaseFiber(CoroArgs &&...args);
+
+    virtual bool is_cancelled() = 0;
+    virtual ~BaseFiber() = default;
+  };
+
+  template<typename Res>
+  struct TypedFiber : BaseFiber {
+    Promise<Res> promise;
+    template<typename... CoroArgs>
+    explicit TypedFiber(Promise<Res> promise, CoroArgs &&...args);
+
+    bool is_cancelled() override;
+  };
+
+  using Fiber = std::unique_ptr<BaseFiber>;
   using Task = std::move_only_function<void()>;
   struct Timer {
     bool operator<(const Timer &timer) const;
 
     std::chrono::time_point<std::chrono::steady_clock> when;
     Task what;
+    mutable BoundStorageMaster<std::optional<std::multiset<Timer>::iterator>> position;
   };
 
-  // TODO: better startup mechanism
+  // TODO: separate scheduler interface from its management function(s)
   template<typename MainFunctor>
   friend void run_in_new(MainFunctor &&main);
-
   void run();
-  void stop();
 
-  void resume_fiber(FiberPtr fiber);
+  void resume_fiber(Fiber fiber);
 
   std::queue<Task> available_tasks = {};
   std::multiset<Timer> pending_timed_tasks = {};
   IOQueue pending_io_tasks = {};
 
-  bool stopped = false;
-  FiberPtr current_fiber = nullptr;
+  Fiber current_fiber = nullptr;
 
   IO fd_io{*this};
-  std::unique_ptr<StdIO> std_io;
+  std::unique_ptr<StreamFD> maybe_std_in;
+  std::unique_ptr<StreamFD> maybe_std_out;
+  std::unique_ptr<StreamFD> maybe_std_err;
 };
 } // namespace AIO
 
@@ -109,13 +125,16 @@ namespace AIO {
 template<typename Functor, typename... Args>
 Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&fun, Args &&...args) {
   using Res = std::invoke_result_t<Functor, Args...>;
-  auto [promise, future] = Contract<Res>();
-  auto fiber = std::make_unique<Fiber>(
-    [this, fun = std::forward<Functor>(fun), args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
-     promise = std::move(promise)] mutable {
+  auto [promise, future] = make_contract<Res>();
+  auto fiber = std::make_unique<TypedFiber<Res>>(
+    std::move(promise),
+    [this,
+      fun = std::forward<Functor>(fun),
+      args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...)] mutable {
       auto invoker = [&]<typename... A>(A &&...a) mutable {
         return std::invoke(std::move(fun), std::forward<A>(a)...);
       };
+      auto &promise = static_cast<TypedFiber<Res> *>(current_fiber.get())->promise;
       try {
         if constexpr (!std::is_void_v<Res>) {
           std::move(promise).fulfill(std::apply(invoker, std::move(args)));
@@ -123,9 +142,6 @@ Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&f
           std::apply(invoker, std::move(args));
           std::move(promise).fulfill();
         }
-        /*
-      TODO: with proper implementation of Future cancelling this should look like this:
-      } catch (const _impl::CoroutineKiller &) {*/
       } catch (...) {
         std::move(promise).fail_any(std::current_exception());
       }
@@ -152,24 +168,28 @@ template<typename Res>
   AIOXX_ASSUME(current_fiber != nullptr);
 
   // See comments below.
-  Fiber &fiber = *current_fiber;
+  auto *fiber = current_fiber.get();
 
   Expected<Res> expected = std::unexpected<std::exception_ptr>(nullptr);
-  std::move(future)
-    .map_expected(
-      [this, fiber = std::move(current_fiber),
-       &expected](std::expected<Res, std::exception_ptr> expected1) mutable -> std::expected<void, std::exception_ptr> {
+  auto continuation = std::move(future).map_expected(
+      [this, fiber = std::move(current_fiber), &expected](std::expected<Res, std::exception_ptr> expected1) mutable
+        -> std::expected<void, std::exception_ptr> {
         expected = std::move(expected1);
         available_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
         return {};
       }
-    )
-    .detach();
+    );
 
   // Future consumer will live until executed once and the fiber will be held at least to this point.
   // Then the fiber will be moved into queue and by that means will live until resumed.
   // However, the consumer can be executed immediately, so TODO -- examine fiber lifetime more carefully at this moment:
-  fiber.yield();
+  try {
+    fiber->coro.yield();
+  } catch (const _impl::CoroutineKiller &) {
+    std::move(continuation).cancel();
+    throw;
+  }
+  std::move(continuation).detach();
 
   if (!expected.has_value())
     std::rethrow_exception(expected.error());
@@ -180,12 +200,29 @@ template<typename Res>
     return;
 }
 
+template<typename... CoroArgs>
+BasicScheduler::BaseFiber::BaseFiber(CoroArgs &&...args) : coro(std::forward<CoroArgs>(args)...) {
+}
+
+template<typename Res>
+template<typename... CoroArgs>
+BasicScheduler::TypedFiber<Res>::TypedFiber(Promise<Res> promise, CoroArgs &&...args)
+    : BaseFiber(std::forward<CoroArgs>(args)...), promise(std::move(promise)) {
+}
+
+template<typename Res>
+bool BasicScheduler::TypedFiber<Res>::is_cancelled() {
+  return promise.is_free();
+}
+
 template<typename Rep, typename Period>
 Future<void> BasicScheduler::timeout(const std::chrono::duration<Rep, Period> &duration) {
   return deadline(
     std::chrono::steady_clock::now() +
     std::chrono::duration_cast<
-      std::chrono::steady_clock::duration, std::chrono::steady_clock::rep, std::chrono::steady_clock::period>(duration)
+      std::chrono::steady_clock::duration,
+      std::chrono::steady_clock::rep,
+      std::chrono::steady_clock::period>(duration)
   );
 }
 
@@ -193,13 +230,15 @@ template<typename MainFunctor>
 void run_in_new(MainFunctor &&main) {
   auto sched = std::make_unique<BasicScheduler>();
 
-  auto main_executed = sched->async([sched = sched.get(), main = std::forward<MainFunctor>(main)] { main(sched); });
-  auto exception_caught = sched->async([](auto err) { panic("unhandled exception", err); });
-  auto sched_stopped = sched->async([sched = sched.get()] { sched->stop(); });
-
-  main_executed().except_any(exception_caught).then(sched_stopped).detach();
+  auto run_main = sched->async([sched = sched.get(), main = std::forward<MainFunctor>(main)] { main(sched); });
+  auto catch_all = sched->async([](auto err) { panic("unhandled exception", err); });
+  auto completed = run_main().except_any(catch_all);
 
   sched->run();
+  if (!completed.is_fulfilled()) {
+    panic("deadlock detected");
+  }
+  std::move(completed).detach();
 }
 
 } // namespace AIO

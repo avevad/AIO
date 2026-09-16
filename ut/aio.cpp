@@ -98,10 +98,6 @@ TEST(AIO, Fiber) {
     EXPECT_EQ(seq, (std::vector{1, 2, 3}));
 
     EXPECT_EQ(sched->io().scheduler(), sched);
-
-    (void) sched->std_in();
-    (void) sched->std_out().try_write(StreamFD::OctetStream{});
-    (void) sched->std_err().try_write(StreamFD::OctetStream{});
   });
 }
 
@@ -227,4 +223,112 @@ TEST(AIO, Hangup) {
 
     std::move(r).close();
   });
+}
+
+TEST(AIO, CancelFiberBeforeStart) {
+  bool started = false;
+  run_in_new([&](BasicScheduler *sched) {
+    auto future = sched->fiber([&] { started = true; });
+    std::move(future).cancel();
+  });
+  EXPECT_FALSE(started);
+}
+
+TEST(AIO, CancelYieldedFiber) {
+  bool started = false;
+  bool continued = false;
+  bool unwound = false;
+  run_in_new([&](BasicScheduler *sched) {
+    auto future = sched->fiber([&, sched] {
+      struct Guard {
+        bool &unwound;
+        ~Guard() {
+          unwound = true;
+        }
+      } guard{unwound};
+      started = true;
+      sched->yield();
+      continued = true;
+    });
+    sched->yield();
+    EXPECT_TRUE(started);
+    std::move(future).cancel();
+  });
+  EXPECT_FALSE(continued);
+  EXPECT_TRUE(unwound);
+}
+
+TEST(AIO, CancelPendingTimer) {
+  run_in_new([](BasicScheduler *sched) {
+    auto future = sched->timeout(1h);
+    std::move(future).cancel();
+  });
+}
+
+TEST(AIO, CancelQueuedTimer) {
+  bool called = false;
+  run_in_new([&](BasicScheduler *sched) {
+    auto future = sched->deadline(std::chrono::steady_clock::now() - 1ms).map_result([&] { called = true; });
+    auto cancel = sched->fiber([future = std::move(future)] mutable { std::move(future).cancel(); });
+    // The timer is extracted behind the cancellation task before either runs.
+    sched->await(std::move(cancel));
+  });
+  EXPECT_FALSE(called);
+}
+
+TEST(AIO, CancelPendingReadiness) {
+  auto pipe = make_pipe();
+  IOQueue queue;
+  IOQueue::Handle handle(pipe.r.fd);
+  queue.add(&handle);
+  auto in = handle.ready<IOQueue::Handle::In>();
+  auto out = handle.ready<IOQueue::Handle::Out>();
+  std::move(out).cancel();
+  EXPECT_FALSE(queue.empty());
+  EXPECT_FALSE(queue.poll(std::chrono::steady_clock::now()));
+  std::move(in).cancel();
+  EXPECT_TRUE(queue.empty());
+  EXPECT_FALSE(queue.poll(std::chrono::steady_clock::now()));
+  std::move(handle.ready<IOQueue::Handle::In>()).cancel();
+  EXPECT_TRUE(queue.empty());
+  queue.erase(&handle);
+}
+
+TEST(AIO, CancelRetrievedReadiness) {
+  auto pipe = make_pipe();
+  IOQueue queue;
+  IOQueue::Handle handle(pipe.w.fd);
+  queue.add(&handle);
+  bool called = false;
+  auto old = handle.ready<IOQueue::Handle::Out>().map_result([&] { called = true; });
+  auto task = queue.poll(std::chrono::steady_clock::now());
+  EXPECT_TRUE(task.has_value());
+  EXPECT_TRUE(queue.empty());
+  auto next = handle.ready<IOQueue::Handle::Out>();
+  std::move(old).cancel();
+  EXPECT_FALSE(queue.empty());
+  if (task)
+    (*task)();
+  EXPECT_FALSE(called);
+  std::move(next).cancel();
+  EXPECT_TRUE(queue.empty());
+  EXPECT_FALSE(queue.poll(std::chrono::steady_clock::now()));
+  queue.erase(&handle);
+}
+
+TEST(AIO, CancelMovedReadiness) {
+  auto pipe = make_pipe();
+  IOQueue::Handle original(pipe.r.fd);
+  auto in = original.ready<IOQueue::Handle::In>();
+  auto out = original.ready<IOQueue::Handle::Out>();
+  IOQueue::Handle moved(std::move(original));
+  IOQueue::Handle assigned(-1);
+  assigned = std::move(moved);
+  std::move(in).cancel();
+  IOQueue queue;
+  queue.add(&assigned);
+  EXPECT_FALSE(queue.empty());
+  std::move(out).cancel();
+  EXPECT_TRUE(queue.empty());
+  queue.erase(&assigned);
 }
