@@ -257,3 +257,21 @@ TEST(AIO, CancelYieldedFiber) {
   EXPECT_FALSE(continued);
   EXPECT_TRUE(unwound);
 }
+
+TEST(AIO, CancelPendingTimer) {
+  run_in_new([](BasicScheduler *sched) {
+    auto future = sched->timeout(1h);
+    std::move(future).cancel();
+  });
+}
+
+TEST(AIO, CancelQueuedTimer) {
+  bool called = false;
+  run_in_new([&](BasicScheduler *sched) {
+    auto future = sched->deadline(std::chrono::steady_clock::now() - 1ms).map_result([&] { called = true; });
+    auto cancel = sched->fiber([future = std::move(future)] mutable { std::move(future).cancel(); });
+    // The timer is extracted behind the cancellation task before either runs.
+    sched->await(std::move(cancel));
+  });
+  EXPECT_FALSE(called);
+}

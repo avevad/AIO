@@ -91,6 +91,7 @@ private:
 
     std::chrono::time_point<std::chrono::steady_clock> when;
     Task what;
+    mutable BoundStorageMaster<std::optional<std::multiset<Timer>::iterator>> position;
   };
 
   // TODO: separate scheduler interface from its management function(s)

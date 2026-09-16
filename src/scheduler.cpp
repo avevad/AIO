@@ -70,8 +70,14 @@ const StreamFD &BasicScheduler::std_err() {
 
 Future<void> BasicScheduler::deadline(const std::chrono::time_point<std::chrono::steady_clock> &time) {
   auto [promise, future] = make_contract<void>();
+  auto [master, slave] = make_storage(std::optional<std::multiset<Timer>::iterator>{});
+  promise.on_hangup([this, slave = std::move(slave)] mutable {
+    if (slave.value())
+      pending_timed_tasks.erase(*slave.value());
+  });
   auto task = [promise = std::move(promise)] mutable { std::move(promise).fulfill(); };
-  pending_timed_tasks.emplace(time, std::move(task));
+  auto timer = pending_timed_tasks.emplace(time, std::move(task), std::move(master));
+  timer->position.value() = timer;
   return std::move(future);
 }
 
@@ -81,8 +87,9 @@ void BasicScheduler::run() {
       { // Check pending tasks for immediate availability -- this is crucial for fairness guarantee.
         auto now = std::chrono::steady_clock::now();
         while (!pending_timed_tasks.empty() && pending_timed_tasks.begin()->when <= now) {
-          Task task = std::move(pending_timed_tasks.extract(pending_timed_tasks.begin()).value().what);
-          available_tasks.push(std::move(task));
+          auto timer = pending_timed_tasks.extract(pending_timed_tasks.begin());
+          timer.value().position.value().reset();
+          available_tasks.push(std::move(timer.value().what));
         }
         if (auto task = pending_io_tasks.poll(now))
           available_tasks.push(std::move(*task));
