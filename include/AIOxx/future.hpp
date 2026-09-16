@@ -12,6 +12,12 @@ class BasicScheduler;
 template<typename Res>
 concept FutureResult = !std::is_reference_v<Res>;
 
+template<FutureResult Res>
+class ConsumedFuture;
+
+template<FutureResult Res>
+class DetachedFuture;
+
 namespace _impl {
   template<FutureResult Res, typename Promise, typename Future>
   class PromiseBase;
@@ -62,13 +68,16 @@ namespace _impl {
     void detach() &&;
 
   private:
+    template<FutureResult Res1>
+    friend class AIO::ConsumedFuture;
+
     template<FutureResult Res1, typename Future1, typename Promise1>
     friend class FutureBase;
     template<FutureResult Res1, typename Promise1, typename Future1>
     friend class PromiseBase;
 
     template<typename Consumer1>
-    void consume_with(Consumer1 &&consumer) &&;
+    ConsumedFuture<Res> consume_with(Consumer1 &&consumer) &&;
 
     bool consumed = false;
     std::optional<ExpectedResult> maybe_result = std::nullopt;
@@ -231,6 +240,46 @@ public:
   void fulfill() &&;
 };
 
+template<FutureResult Res>
+class DetachedFuture {
+public:
+  explicit DetachedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
+  }
+
+  DetachedFuture(DetachedFuture &&) noexcept = default;
+  DetachedFuture &operator=(DetachedFuture &&) noexcept = default;
+
+  DetachedFuture(const DetachedFuture &) = delete;
+  DetachedFuture &operator=(const DetachedFuture &) = delete;
+
+  void cancel() &&;
+  ConsumedFuture<Res> attach() &&;
+
+private:
+  Future<Res> future;
+};
+
+template<FutureResult Res>
+class [[nodiscard]] ConsumedFuture {
+public:
+  explicit ConsumedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
+  }
+
+  ConsumedFuture(ConsumedFuture &&) noexcept = default;
+  ConsumedFuture &operator=(ConsumedFuture &&other) noexcept;
+
+  ConsumedFuture(const ConsumedFuture &) = delete;
+  ConsumedFuture &operator=(const ConsumedFuture &) = delete;
+
+  ~ConsumedFuture();
+
+  void cancel() &&;
+  DetachedFuture<Res> release() &&;
+
+private:
+  Future<Res> future;
+};
+
 template<typename Res>
 [[nodiscard]] auto make_contract() {
   struct Contract {
@@ -313,15 +362,16 @@ namespace _impl {
             MappedFuture future1 = fun(result.move_as_ok());
             std::move(future1).consume_with([promise = std::move(promise)](auto result1) mutable {
               std::move(promise).set(std::move(result1));
-            });
+            })
+              .release();
           } catch (...) {
             std::move(promise).set(MappedExpected::make_err_from_current());
           }
         } else {
           std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
         }
-      }
-    );
+      })
+      .release();
     return std::move(future);
   }
 
@@ -339,7 +389,8 @@ namespace _impl {
               Future future1 = handler(e);
               std::move(future1).consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
                 std::move(promise).set(std::move(result1));
-              });
+                })
+                .release();
             } catch (...) {
               std::move(promise).set(ExpectedResult::make_err_from_current());
             }
@@ -350,7 +401,8 @@ namespace _impl {
           std::move(promise).set(std::move(result));
         }
       }
-    );
+    )
+      .release();
     return std::move(future);
   }
 
@@ -368,7 +420,8 @@ namespace _impl {
               Future future1 = handler(std::current_exception());
               std::move(future1).consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
                 std::move(promise).set(std::move(result1));
-              });
+                })
+                .release();
             } catch (...) {
               std::move(promise).set(ExpectedResult::make_err_from_current());
             }
@@ -377,7 +430,7 @@ namespace _impl {
           std::move(promise).set(std::move(result));
         }
       }
-    );
+    ).release();
     return std::move(future);
   }
 
@@ -396,9 +449,9 @@ namespace _impl {
           }
         } else {
           std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
+          }
         }
-      }
-    );
+    ).release();
     return std::move(future);
   }
 
@@ -413,9 +466,9 @@ namespace _impl {
           std::move(promise).set(MappedExpected{.expected = functor(std::move(result.expected))});
         } catch (...) {
           std::move(promise).set(MappedExpected::make_err_from_current());
+          }
         }
-      }
-    );
+    ).release();
 
     return std::move(future);
   }
@@ -432,7 +485,7 @@ namespace _impl {
           warning("unhandled error in detached future", std::current_exception());
         }
       }
-    });
+    }).release();
   }
 
   template<FutureResult Res, typename Future, typename Promise>
@@ -459,7 +512,7 @@ namespace _impl {
 
   template<FutureResult Res, typename Future, typename Promise>
   template<typename Consumer1>
-  void FutureBase<Res, Future, Promise>::consume_with(Consumer1 &&consumer1) && {
+  ConsumedFuture<Res> FutureBase<Res, Future, Promise>::consume_with(Consumer1 &&consumer1) && {
     Consumer consumer(std::forward<Consumer1>(consumer1));
     AIOXX_ASSUME(consumer);
 
@@ -483,6 +536,10 @@ namespace _impl {
     if (result)
       consumer(std::move(*result));
     (void) handler;
+
+    Future future;
+    static_cast<FutureBase &>(future) = std::move(*this);
+    return ConsumedFuture<Res>(std::move(future));
   }
 
   template<FutureResult Res, typename Promise, typename Future>
@@ -697,6 +754,44 @@ Future<void>::Mapped<Res1> Future<void>::map_expected(Functor &&functor) && {
       return functor(std::move(expected).transform([](auto) {}));
     });
   }
+}
+
+template<FutureResult Res>
+void DetachedFuture<Res>::cancel() && {
+  std::move(future).cancel();
+}
+
+template<FutureResult Res>
+ConsumedFuture<Res> DetachedFuture<Res>::attach() && {
+  return ConsumedFuture<Res>(std::move(future));
+}
+
+template<FutureResult Res>
+ConsumedFuture<Res> &ConsumedFuture<Res>::operator=(ConsumedFuture &&other) noexcept {
+  if (this == &other)
+    return *this;
+
+  if (future.is_initialized())
+    std::move(future).cancel();
+
+  future = std::move(other.future);
+  return *this;
+}
+
+template<FutureResult Res>
+ConsumedFuture<Res>::~ConsumedFuture() {
+  if (future.is_initialized())
+    std::move(future).cancel();
+}
+
+template<FutureResult Res>
+void ConsumedFuture<Res>::cancel() && {
+  std::move(future).cancel();
+}
+
+template<FutureResult Res>
+DetachedFuture<Res> ConsumedFuture<Res>::release() && {
+  return DetachedFuture<Res>(std::move(future));
 }
 
 inline Future<void>::Future(Future<_impl::Void> &&other) noexcept : FutureBase(std::move(other)) {
