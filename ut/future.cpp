@@ -2,6 +2,7 @@
 
 #include "AIOxx/future.hpp"
 
+#include <stdexcept>
 #include <string>
 
 using namespace AIO;
@@ -273,4 +274,90 @@ TEST(Future, ExceptAnyHandlerThrows) {
       throw std::runtime_error("handler");
     });
   std::move(f).detach();
+}
+
+TEST(Future, CancelMappedChain) {
+  auto [promise, future] = make_contract<int>();
+  bool cancelled = false;
+  bool called = false;
+  promise.on_hangup([&] { cancelled = true; });
+
+  auto f =
+    std::move(future)
+      .map_result([&](int x) {
+        called = true;
+        return x + 1;
+      })
+      .map_expected([&](Expected<int> result) {
+        called = true;
+        return result;
+      });
+  std::move(f).cancel();
+  EXPECT_TRUE(cancelled);
+  std::move(promise).fulfill(1);
+  EXPECT_FALSE(called);
+}
+
+TEST(Future, CancelThenNestedFuture) {
+  auto [promise, future] = make_contract<void>();
+  bool cancelled = false;
+  promise.on_hangup([&] { cancelled = true; });
+
+  auto f = ok(1).then([&](int) { return std::move(future); });
+  std::move(f).cancel();
+  EXPECT_TRUE(cancelled);
+  std::move(promise).fulfill();
+}
+
+TEST(Future, CancelInsideThenCallback) {
+  auto [promise, future] = make_contract<int>();
+  auto [promise1, future1] = make_contract<void>();
+  bool cancelled = false;
+  promise1.on_hangup([&] { cancelled = true; });
+
+  Future<void> f;
+  f = std::move(future).then([&](int) {
+    std::move(f).cancel();
+    return std::move(future1);
+  });
+  std::move(promise).fulfill(1);
+  EXPECT_TRUE(cancelled);
+  std::move(promise1).fulfill();
+}
+
+TEST(Future, CancelExceptionRecoveryChain) {
+  auto [promise, future] = make_contract<int>();
+  auto [promise1, future1] = make_contract<int>();
+  bool cancelled = false;
+  bool handled = false;
+  bool any_called = false;
+  promise1.on_hangup([&] { cancelled = true; });
+
+  auto f =
+    std::move(future)
+      .except<std::runtime_error>([&](std::runtime_error &) {
+        handled = true;
+        return std::move(future1);
+      })
+      .except_any([&](std::exception_ptr) {
+        any_called = true;
+        return ok(2);
+      });
+  std::move(promise).fail(std::runtime_error("x"));
+  EXPECT_TRUE(handled);
+  std::move(f).cancel();
+  EXPECT_TRUE(cancelled);
+  std::move(promise1).fail(std::runtime_error("late"));
+  EXPECT_FALSE(any_called);
+}
+
+TEST(Future, CancelAfterThenCompletion) {
+  bool called = false;
+  auto f = ok(1).then([&](int) {
+    called = true;
+    return ok();
+  });
+  EXPECT_TRUE(called);
+  EXPECT_TRUE(f.is_fulfilled());
+  std::move(f).cancel();
 }

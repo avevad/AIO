@@ -127,8 +127,9 @@ Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&f
   auto [promise, future] = make_contract<Res>();
   auto fiber = std::make_unique<TypedFiber<Res>>(
     std::move(promise),
-    [this, fun = std::forward<Functor>(fun),
-     args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...)] mutable {
+    [this,
+      fun = std::forward<Functor>(fun),
+      args = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...)] mutable {
       auto invoker = [&]<typename... A>(A &&...a) mutable {
         return std::invoke(std::move(fun), std::forward<A>(a)...);
       };
@@ -174,8 +175,8 @@ template<typename Res>
   Expected<Res> expected = std::unexpected<std::exception_ptr>(nullptr);
   std::move(future)
     .map_expected(
-      [this, fiber = std::move(current_fiber),
-       &expected](std::expected<Res, std::exception_ptr> expected1) mutable -> std::expected<void, std::exception_ptr> {
+      [this, fiber = std::move(current_fiber), &expected](std::expected<Res, std::exception_ptr> expected1) mutable
+        -> std::expected<void, std::exception_ptr> {
         expected = std::move(expected1);
         available_tasks.push([this, fiber = std::move(fiber)] mutable { resume_fiber(std::move(fiber)); });
         return {};
@@ -217,7 +218,9 @@ Future<void> BasicScheduler::timeout(const std::chrono::duration<Rep, Period> &d
   return deadline(
     std::chrono::steady_clock::now() +
     std::chrono::duration_cast<
-      std::chrono::steady_clock::duration, std::chrono::steady_clock::rep, std::chrono::steady_clock::period>(duration)
+      std::chrono::steady_clock::duration,
+      std::chrono::steady_clock::rep,
+      std::chrono::steady_clock::period>(duration)
   );
 }
 

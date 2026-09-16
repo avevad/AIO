@@ -35,7 +35,9 @@ panic(const std::string &what, std::exception_ptr err, std::source_location wher
 void warning(const std::string &what, std::source_location where = std::source_location::current());
 
 void warning(
-  const std::string &what, std::exception_ptr err, std::source_location where = std::source_location::current()
+  const std::string &what,
+  std::exception_ptr err,
+  std::source_location where = std::source_location::current()
 );
 
 template<typename Derived, typename Derived1, bool Master>
@@ -68,34 +70,70 @@ private:
   std::optional<Derived1 *> maybe_ptr = std::nullopt;
 };
 
-template<typename T, bool Master>
-class BoundStorage : public Bond<BoundStorage<T, Master>, BoundStorage<T, !Master>, Master> {
-  using Bond = Bond<BoundStorage, BoundStorage<T, !Master>, Master>;
+template<typename T>
+class BoundStorageSlave;
+
+template<typename T>
+class BoundStorageMaster : public Bond<BoundStorageMaster<T>, BoundStorageSlave<T>, true> {
+  using Bond = Bond<BoundStorageMaster, BoundStorageSlave<T>, true>;
 
 public:
-  BoundStorage() = default;
+  explicit BoundStorageMaster(T value);
 
-  BoundStorage(BoundStorage &&) noexcept = default;
-  BoundStorage &operator=(BoundStorage &&) noexcept = default;
+  BoundStorageMaster(BoundStorageMaster &&) noexcept = default;
+  BoundStorageMaster &operator=(BoundStorageMaster &&other) noexcept;
 
-  BoundStorage(const BoundStorage &) = delete;
-  BoundStorage &operator=(const BoundStorage &) = delete;
+  BoundStorageMaster(const BoundStorageMaster &) = delete;
+  BoundStorageMaster &operator=(const BoundStorageMaster &) = delete;
 
-  ~BoundStorage();
+  ~BoundStorageMaster();
 
-  void bind_to(BoundStorage<T, !Master> &bound);
+  void bind_to(BoundStorageSlave<T> &bound);
 
-  template<typename T1>
-  void set(T1 &&value);
-
-  T &get();
-  const T &get() const;
+  T &value();
+  const T &value() const;
 
 private:
-  friend class BoundStorage<T, !Master>;
+  T stored_value;
+};
+
+template<typename T>
+class BoundStorageSlave : public Bond<BoundStorageSlave<T>, BoundStorageMaster<T>, false> {
+  using Bond = Bond<BoundStorageSlave, BoundStorageMaster<T>, false>;
+
+public:
+  BoundStorageSlave() = default;
+
+  BoundStorageSlave(BoundStorageSlave &&) noexcept = default;
+  BoundStorageSlave &operator=(BoundStorageSlave &&) noexcept = default;
+
+  BoundStorageSlave(const BoundStorageSlave &) = delete;
+  BoundStorageSlave &operator=(const BoundStorageSlave &) = delete;
+
+  void bind_to(BoundStorageMaster<T> &bound);
+
+  T &value();
+  const T &value() const;
+
+private:
+  friend class BoundStorageMaster<T>;
 
   std::optional<T> maybe_value = std::nullopt;
 };
+
+template<typename T>
+[[nodiscard]] auto make_storage(T value) {
+  struct Storage {
+    BoundStorageMaster<T> master;
+    BoundStorageSlave<T> slave = {};
+
+    explicit Storage(T value) : master(std::move(value)) {
+      master.bind_to(slave);
+    }
+  };
+
+  return Storage{std::move(value)};
+}
 
 template<typename Res>
 using Expected = std::expected<Res, std::exception_ptr>;
@@ -205,70 +243,60 @@ Bond<Derived1, Derived, !Master> *Bond<Derived, Derived1, Master>::get_base_ptr(
   return maybe_ptr.has_value() ? static_cast<Bond<Derived1, Derived, !Master> *>(*maybe_ptr) : nullptr;
 }
 
-template<typename T, bool Master>
-BoundStorage<T, Master>::~BoundStorage() {
-  if constexpr (Master) {
-    if (maybe_value.has_value() && Bond::is_initialized() && Bond::is_alive()) {
-      auto &slave = Bond::get();
-      slave.maybe_value = std::move(maybe_value);
-      maybe_value.reset();
-    }
-  }
+template<typename T>
+BoundStorageMaster<T>::BoundStorageMaster(T value) : stored_value(std::move(value)) {
 }
 
-template<typename T, bool Master>
-void BoundStorage<T, Master>::bind_to(BoundStorage<T, !Master> &bound) {
-  AIOXX_ASSUME(!maybe_value.has_value());
+template<typename T>
+BoundStorageMaster<T> &BoundStorageMaster<T>::operator=(BoundStorageMaster &&other) noexcept {
+  if (this == &other)
+    return *this;
+
+  if (Bond::is_initialized() && Bond::is_alive())
+    Bond::get().maybe_value.emplace(std::move(stored_value));
+
+  Bond::operator=(std::move(other));
+  stored_value = std::move(other.stored_value);
+  return *this;
+}
+
+template<typename T>
+BoundStorageMaster<T>::~BoundStorageMaster() {
+  if (Bond::is_initialized() && Bond::is_alive())
+    Bond::get().maybe_value.emplace(std::move(stored_value));
+}
+
+template<typename T>
+void BoundStorageMaster<T>::bind_to(BoundStorageSlave<T> &bound) {
   AIOXX_ASSUME(!bound.maybe_value.has_value());
   Bond::initialize(bound);
 }
 
-template<typename T, bool Master>
-template<typename T1>
-void BoundStorage<T, Master>::set(T1 &&value) {
-  AIOXX_ASSUME(Bond::is_initialized());
-
-  if constexpr (Master) {
-    maybe_value = std::forward<T1>(value);
-  } else {
-    if (Bond::is_alive()) {
-      Bond::get().set(std::forward<T1>(value));
-    } else {
-      maybe_value = std::forward<T1>(value);
-    }
-  }
+template<typename T>
+T &BoundStorageMaster<T>::value() {
+  return stored_value;
 }
 
-template<typename T, bool Master>
-T &BoundStorage<T, Master>::get() {
-  AIOXX_ASSUME(Bond::is_initialized());
-
-  if constexpr (Master) {
-    AIOXX_ASSUME(maybe_value.has_value());
-    return *maybe_value;
-  } else {
-    if (Bond::is_alive()) {
-      return Bond::get().get();
-    }
-    AIOXX_ASSUME(maybe_value.has_value());
-    return *maybe_value;
-  }
+template<typename T>
+const T &BoundStorageMaster<T>::value() const {
+  return stored_value;
 }
 
-template<typename T, bool Master>
-const T &BoundStorage<T, Master>::get() const {
-  AIOXX_ASSUME(Bond::is_initialized());
+template<typename T>
+void BoundStorageSlave<T>::bind_to(BoundStorageMaster<T> &bound) {
+  bound.bind_to(*this);
+}
 
-  if constexpr (Master) {
-    AIOXX_ASSUME(maybe_value.has_value());
-    return *maybe_value;
-  } else {
-    if (Bond::is_alive()) {
-      return Bond::get().get();
-    }
-    AIOXX_ASSUME(maybe_value.has_value());
-    return *maybe_value;
-  }
+template<typename T>
+T &BoundStorageSlave<T>::value() {
+  if (Bond::is_alive())
+    return Bond::get().value();
+  return *maybe_value;
+}
+
+template<typename T>
+const T &BoundStorageSlave<T>::value() const {
+  return const_cast<BoundStorageSlave *>(this)->value();
 }
 
 template<typename Res>

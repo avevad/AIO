@@ -280,6 +280,33 @@ private:
   Future<Res> future;
 };
 
+namespace _impl {
+  template<FutureResult Res>
+  class DetachedCanceller {
+  public:
+    void dispose(DetachedFuture<Res> future) {
+      if (cancelled)
+        std::move(future).cancel();
+      else
+        maybe_future.emplace(std::move(future));
+    }
+
+    void cancel() {
+      if (cancelled)
+        return;
+      cancelled = true;
+      auto future = std::move(maybe_future);
+      maybe_future.reset();
+      if (future)
+        std::move(*future).cancel();
+    }
+
+  private:
+    bool cancelled = false;
+    std::optional<DetachedFuture<Res>> maybe_future;
+  };
+} // namespace _impl
+
 template<typename Res>
 [[nodiscard]] auto make_contract() {
   struct Contract {
@@ -355,26 +382,38 @@ namespace _impl {
     using MappedFuture = Future::template Mapped<Res1>;
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     auto [promise, future] = make_contract<Res1>();
-    std::move(*this)
-      .consume_with(
-        [promise = std::move(promise), fun = std::forward<AsyncFunctor>(functor)](ExpectedResult result) mutable {
-          if (result.is_ok()) {
-            try {
-              MappedFuture future1 = fun(result.move_as_ok());
-              std::move(future1)
-                .consume_with([promise = std::move(promise)](auto result1) mutable {
-                  std::move(promise).set(std::move(result1));
-                })
-                .release();
-            } catch (...) {
-              std::move(promise).set(MappedExpected::make_err_from_current());
+    auto [master, slave] = make_storage(DetachedCanceller<Res>{});
+    auto [master1, slave1] = make_storage(DetachedCanceller<Res1>{});
+    promise.on_hangup([slave = std::move(slave), slave1 = std::move(slave1)] mutable {
+      slave.value().cancel();
+      slave1.value().cancel();
+    });
+    master.value().dispose(
+      std::move(*this)
+        .consume_with(
+          [promise = std::move(promise), master1 = std::move(master1), fun = std::forward<AsyncFunctor>(functor)](
+            ExpectedResult result
+          ) mutable {
+            if (result.is_ok()) {
+              try {
+                MappedFuture future1 = fun(result.move_as_ok());
+                master1.value().dispose(
+                  std::move(future1)
+                    .consume_with([promise = std::move(promise)](auto result1) mutable {
+                      std::move(promise).set(std::move(result1));
+                    })
+                    .release()
+                );
+              } catch (...) {
+                std::move(promise).set(MappedExpected::make_err_from_current());
+              }
+            } else {
+              std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
             }
-          } else {
-            std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
           }
-        }
-      )
-      .release();
+        )
+        .release()
+    );
     return std::move(future);
   }
 
@@ -382,32 +421,44 @@ namespace _impl {
   template<typename Exception, typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except(AsyncHandler &&handler) && {
     auto [promise, future] = make_contract<Res>();
-    std::move(*this)
-      .consume_with(
-        [promise = std::move(promise), handler = std::forward<AsyncHandler>(handler)](ExpectedResult result) mutable {
-          if (!result.is_ok()) {
-            try {
-              std::rethrow_exception(result.move_as_err());
-            } catch (Exception &e) {
+    auto [master, slave] = make_storage(DetachedCanceller<Res>{});
+    auto [master1, slave1] = make_storage(DetachedCanceller<Res>{});
+    promise.on_hangup([slave = std::move(slave), slave1 = std::move(slave1)] mutable {
+      slave.value().cancel();
+      slave1.value().cancel();
+    });
+    master.value().dispose(
+      std::move(*this)
+        .consume_with(
+          [promise = std::move(promise), master1 = std::move(master1), handler = std::forward<AsyncHandler>(handler)](
+            ExpectedResult result
+          ) mutable {
+            if (!result.is_ok()) {
               try {
-                Future future1 = handler(e);
-                std::move(future1)
-                  .consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
-                    std::move(promise).set(std::move(result1));
-                  })
-                  .release();
+                std::rethrow_exception(result.move_as_err());
+              } catch (Exception &e) {
+                try {
+                  Future future1 = handler(e);
+                  master1.value().dispose(
+                    std::move(future1)
+                      .consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
+                        std::move(promise).set(std::move(result1));
+                      })
+                      .release()
+                  );
+                } catch (...) {
+                  std::move(promise).set(ExpectedResult::make_err_from_current());
+                }
               } catch (...) {
                 std::move(promise).set(ExpectedResult::make_err_from_current());
               }
-            } catch (...) {
-              std::move(promise).set(ExpectedResult::make_err_from_current());
+            } else {
+              std::move(promise).set(std::move(result));
             }
-          } else {
-            std::move(promise).set(std::move(result));
           }
-        }
-      )
-      .release();
+        )
+        .release()
+    );
     return std::move(future);
   }
 
@@ -415,30 +466,42 @@ namespace _impl {
   template<typename AsyncHandler>
   Future FutureBase<Res, Future, Promise>::except_any(AsyncHandler &&handler) && {
     auto [promise, future] = make_contract<Res>();
-    std::move(*this)
-      .consume_with(
-        [promise = std::move(promise), handler = std::forward<AsyncHandler>(handler)](ExpectedResult result) mutable {
-          if (!result.is_ok()) {
-            try {
-              std::rethrow_exception(result.move_as_err());
-            } catch (...) {
+    auto [master, slave] = make_storage(DetachedCanceller<Res>{});
+    auto [master1, slave1] = make_storage(DetachedCanceller<Res>{});
+    promise.on_hangup([slave = std::move(slave), slave1 = std::move(slave1)] mutable {
+      slave.value().cancel();
+      slave1.value().cancel();
+    });
+    master.value().dispose(
+      std::move(*this)
+        .consume_with(
+          [promise = std::move(promise), master1 = std::move(master1), handler = std::forward<AsyncHandler>(handler)](
+            ExpectedResult result
+          ) mutable {
+            if (!result.is_ok()) {
               try {
-                Future future1 = handler(std::current_exception());
-                std::move(future1)
-                  .consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
-                    std::move(promise).set(std::move(result1));
-                  })
-                  .release();
+                std::rethrow_exception(result.move_as_err());
               } catch (...) {
-                std::move(promise).set(ExpectedResult::make_err_from_current());
+                try {
+                  Future future1 = handler(std::current_exception());
+                  master1.value().dispose(
+                    std::move(future1)
+                      .consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
+                        std::move(promise).set(std::move(result1));
+                      })
+                      .release()
+                  );
+                } catch (...) {
+                  std::move(promise).set(ExpectedResult::make_err_from_current());
+                }
               }
+            } else {
+              std::move(promise).set(std::move(result));
             }
-          } else {
-            std::move(promise).set(std::move(result));
           }
-        }
-      )
-      .release();
+        )
+        .release()
+    );
     return std::move(future);
   }
 
@@ -447,21 +510,25 @@ namespace _impl {
   auto FutureBase<Res, Future, Promise>::map_result(Functor &&functor) && {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     auto [promise, future] = make_contract<Res1>();
-    std::move(*this)
-      .consume_with(
-        [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
-          if (result.is_ok()) {
-            try {
-              std::move(promise).fulfill(functor(result.move_as_ok()));
-            } catch (...) {
-              std::move(promise).set(MappedExpected::make_err_from_current());
+    auto [master, slave] = make_storage(DetachedCanceller<Res>{});
+    promise.on_hangup([slave = std::move(slave)] mutable { slave.value().cancel(); });
+    master.value().dispose(
+      std::move(*this)
+        .consume_with(
+          [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
+            if (result.is_ok()) {
+              try {
+                std::move(promise).fulfill(functor(result.move_as_ok()));
+              } catch (...) {
+                std::move(promise).set(MappedExpected::make_err_from_current());
+              }
+            } else {
+              std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
             }
-          } else {
-            std::move(promise).set(MappedExpected::make_err(result.move_as_err()));
           }
-        }
-      )
-      .release();
+        )
+        .release()
+    );
     return std::move(future);
   }
 
@@ -470,17 +537,21 @@ namespace _impl {
   auto FutureBase<Res, Future, Promise>::map_expected(Functor &&functor) && {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     auto [promise, future] = make_contract<Res1>();
-    std::move(*this)
-      .consume_with(
-        [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
-          try {
-            std::move(promise).set(MappedExpected{.expected = functor(std::move(result.expected))});
-          } catch (...) {
-            std::move(promise).set(MappedExpected::make_err_from_current());
+    auto [master, slave] = make_storage(DetachedCanceller<Res>{});
+    promise.on_hangup([slave = std::move(slave)] mutable { slave.value().cancel(); });
+    master.value().dispose(
+      std::move(*this)
+        .consume_with(
+          [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
+            try {
+              std::move(promise).set(MappedExpected{.expected = functor(std::move(result.expected))});
+            } catch (...) {
+              std::move(promise).set(MappedExpected::make_err_from_current());
+            }
           }
-        }
-      )
-      .release();
+        )
+        .release()
+    );
 
     return std::move(future);
   }
