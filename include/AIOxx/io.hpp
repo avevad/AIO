@@ -22,8 +22,10 @@ public:
     Handle(const Handle &) = delete;
     Handle &operator=(const Handle &) = delete;
 
-    Future<void> ready_in();
-    Future<void> ready_out();
+    enum Direction { In, Out };
+
+    template<Direction direction>
+    Future<void> ready();
 
     ~Handle();
 
@@ -33,8 +35,13 @@ public:
     SystemFD fd;
     IOQueue *queue = nullptr;
 
+    struct Pending {
+      Promise<void> promise;
+      BoundStorageMaster<Handle *> handle;
+    };
+
     // TODO: thread-safety.
-    std::optional<Promise<void>> prom_in = std::nullopt, prom_out = std::nullopt;
+    std::optional<Pending> prom_in = std::nullopt, prom_out = std::nullopt;
 
     // TODO: platform independence.
     uint32_t epoll_events = 0;

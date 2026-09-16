@@ -17,6 +17,11 @@ IOQueue::Handle::Handle(Handle &&other) noexcept
     : fd(other.fd), prom_in(std::move(other.prom_in)), prom_out(std::move(other.prom_out)) {
   AIOXX_ASSUME(other.queue == nullptr);
 
+  if (prom_in)
+    prom_in->handle.value() = this;
+  if (prom_out)
+    prom_out->handle.value() = this;
+
   other.fd = -1;
   other.queue = nullptr;
   other.prom_in.reset();
@@ -35,6 +40,11 @@ IOQueue::Handle &IOQueue::Handle::operator=(Handle &&other) noexcept {
   prom_in = std::move(other.prom_in);
   prom_out = std::move(other.prom_out);
 
+  if (prom_in)
+    prom_in->handle.value() = this;
+  if (prom_out)
+    prom_out->handle.value() = this;
+
   other.fd = -1;
   other.queue = nullptr;
   other.prom_in.reset();
@@ -43,10 +53,24 @@ IOQueue::Handle &IOQueue::Handle::operator=(Handle &&other) noexcept {
   return *this;
 }
 
-Future<void> IOQueue::Handle::ready_in() {
-  AIOXX_ASSUME(!prom_in.has_value());
+template<IOQueue::Handle::Direction direction>
+Future<void> IOQueue::Handle::ready() {
+  static_assert(direction == In || direction == Out);
+  auto &pending = direction == In ? prom_in : prom_out;
+  AIOXX_ASSUME(!pending.has_value());
   auto [promise, future] = make_contract<void>();
-  prom_in = std::move(promise);
+  auto [master, slave] = make_storage(this);
+  promise.on_hangup([slave = std::move(slave)] mutable {
+    auto *handle = slave.value();
+    if (!handle)
+      return;
+    (direction == In ? handle->prom_in : handle->prom_out).reset();
+    if (handle->queue) {
+      --handle->queue->pending_consumers;
+      handle->queue->schedule_update(handle);
+    }
+  });
+  pending.emplace(std::move(promise), std::move(master));
   if (queue) {
     ++queue->pending_consumers;
     queue->schedule_update(this);
@@ -54,16 +78,8 @@ Future<void> IOQueue::Handle::ready_in() {
   return std::move(future);
 }
 
-Future<void> IOQueue::Handle::ready_out() {
-  AIOXX_ASSUME(!prom_out.has_value());
-  auto [promise, future] = make_contract<void>();
-  prom_out = std::move(promise);
-  if (queue) {
-    ++queue->pending_consumers;
-    queue->schedule_update(this);
-  }
-  return std::move(future);
-}
+template Future<void> IOQueue::Handle::ready<IOQueue::Handle::In>();
+template Future<void> IOQueue::Handle::ready<IOQueue::Handle::Out>();
 
 IOQueue::Handle::~Handle() {
   AIOXX_ASSUME(queue == nullptr);
@@ -159,12 +175,14 @@ std::optional<IOQueue::Task> IOQueue::poll(std::optional<std::chrono::time_point
     auto *handle = static_cast<Handle *>(ep_evt.data.ptr);
     std::optional<Promise<void>> in = std::nullopt, out = std::nullopt;
     if (handle->prom_in && (ep_evt.events & (EPOLLIN | EPOLLERR | EPOLLHUP))) {
-      in = std::move(handle->prom_in);
+      handle->prom_in->handle.value() = nullptr;
+      in = std::move(handle->prom_in->promise);
       handle->prom_in.reset();
       --pending_consumers;
     }
     if (handle->prom_out && (ep_evt.events & (EPOLLOUT | EPOLLERR | EPOLLHUP))) {
-      out = std::move(handle->prom_out);
+      handle->prom_out->handle.value() = nullptr;
+      out = std::move(handle->prom_out->promise);
       handle->prom_out.reset();
       --pending_consumers;
     }

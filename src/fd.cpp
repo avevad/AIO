@@ -29,9 +29,9 @@ Future<void> FD::ready(Direction direction) const {
 
   switch (direction) {
   case IN:
-    return state->handle.ready_in();
+    return state->handle.ready<IOQueue::Handle::In>();
   case OUT:
-    return state->handle.ready_out();
+    return state->handle.ready<IOQueue::Handle::Out>();
   }
 }
 

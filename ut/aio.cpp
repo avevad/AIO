@@ -275,3 +275,60 @@ TEST(AIO, CancelQueuedTimer) {
   });
   EXPECT_FALSE(called);
 }
+
+TEST(AIO, CancelPendingReadiness) {
+  auto pipe = make_pipe();
+  IOQueue queue;
+  IOQueue::Handle handle(pipe.r.fd);
+  queue.add(&handle);
+  auto in = handle.ready<IOQueue::Handle::In>();
+  auto out = handle.ready<IOQueue::Handle::Out>();
+  std::move(out).cancel();
+  EXPECT_FALSE(queue.empty());
+  EXPECT_FALSE(queue.poll(std::chrono::steady_clock::now()));
+  std::move(in).cancel();
+  EXPECT_TRUE(queue.empty());
+  EXPECT_FALSE(queue.poll(std::chrono::steady_clock::now()));
+  std::move(handle.ready<IOQueue::Handle::In>()).cancel();
+  EXPECT_TRUE(queue.empty());
+  queue.erase(&handle);
+}
+
+TEST(AIO, CancelRetrievedReadiness) {
+  auto pipe = make_pipe();
+  IOQueue queue;
+  IOQueue::Handle handle(pipe.w.fd);
+  queue.add(&handle);
+  bool called = false;
+  auto old = handle.ready<IOQueue::Handle::Out>().map_result([&] { called = true; });
+  auto task = queue.poll(std::chrono::steady_clock::now());
+  EXPECT_TRUE(task.has_value());
+  EXPECT_TRUE(queue.empty());
+  auto next = handle.ready<IOQueue::Handle::Out>();
+  std::move(old).cancel();
+  EXPECT_FALSE(queue.empty());
+  if (task)
+    (*task)();
+  EXPECT_FALSE(called);
+  std::move(next).cancel();
+  EXPECT_TRUE(queue.empty());
+  EXPECT_FALSE(queue.poll(std::chrono::steady_clock::now()));
+  queue.erase(&handle);
+}
+
+TEST(AIO, CancelMovedReadiness) {
+  auto pipe = make_pipe();
+  IOQueue::Handle original(pipe.r.fd);
+  auto in = original.ready<IOQueue::Handle::In>();
+  auto out = original.ready<IOQueue::Handle::Out>();
+  IOQueue::Handle moved(std::move(original));
+  IOQueue::Handle assigned(-1);
+  assigned = std::move(moved);
+  std::move(in).cancel();
+  IOQueue queue;
+  queue.add(&assigned);
+  EXPECT_FALSE(queue.empty());
+  std::move(out).cancel();
+  EXPECT_TRUE(queue.empty());
+  queue.erase(&assigned);
+}
