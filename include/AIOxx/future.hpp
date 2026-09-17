@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <tuple>
 #include <type_traits>
 
 #include "coroutine.hpp"
@@ -133,6 +134,8 @@ namespace _impl {
   };
 
   struct Void {};
+  template<typename Res>
+  using VoidSafe = std::conditional_t<std::is_void_v<Res>, Void, Res>;
 } // namespace _impl
 
 template<FutureResult Res>
@@ -243,8 +246,7 @@ public:
 template<FutureResult Res>
 class DetachedFuture {
 public:
-  explicit DetachedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
-  }
+  explicit DetachedFuture(Future<Res> &&future) noexcept;
 
   DetachedFuture(DetachedFuture &&) noexcept = default;
   DetachedFuture &operator=(DetachedFuture &&) noexcept = default;
@@ -262,8 +264,7 @@ private:
 template<FutureResult Res>
 class [[nodiscard]] ConsumedFuture {
 public:
-  explicit ConsumedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
-  }
+  explicit ConsumedFuture(Future<Res> &&future) noexcept;
 
   ConsumedFuture(ConsumedFuture &&) noexcept = default;
   ConsumedFuture &operator=(ConsumedFuture &&other) noexcept;
@@ -284,29 +285,50 @@ namespace _impl {
   template<FutureResult Res>
   class DetachedCanceller {
   public:
-    void dispose(DetachedFuture<Res> future) {
-      if (cancelled)
-        std::move(future).cancel();
-      else
-        maybe_future.emplace(std::move(future));
-    }
+    void dispose(DetachedFuture<Res> future);
 
-    void cancel() {
-      if (cancelled)
-        return;
-      cancelled = true;
-      auto future = std::move(maybe_future);
-      maybe_future.reset();
-      if (future)
-        std::move(*future).cancel();
-    }
+    void cancel();
 
   private:
     bool cancelled = false;
-    std::optional<DetachedFuture<Res>> maybe_future;
+    std::optional<DetachedFuture<Res>> maybe_future = std::nullopt;
   };
 } // namespace _impl
 
+template<typename Res>
+[[nodiscard]] auto make_contract();
+
+template<FutureResult Res1, FutureResult Res2>
+class And {
+public:
+  And(_impl::VoidSafe<Res1> res1, _impl::VoidSafe<Res2> res2);
+
+  And(And &&) = default;
+  And &operator=(And &&) = default;
+
+  And(const And &) = delete;
+  And &operator=(const And &) = delete;
+
+  auto unwrap() &&;
+
+private:
+  template<typename Res>
+  static auto unwrap_value(Res &&res);
+
+  template<FutureResult Left, FutureResult Right>
+  static auto unwrap_value(And<Left, Right> &&res);
+
+  std::tuple<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>> value;
+};
+} // namespace AIO
+
+
+// --------------------------------------------------
+// -------------- TEMPLATE DEFINITIONS --------------
+// --------------------------------------------------
+
+
+namespace AIO {
 template<typename Res>
 [[nodiscard]] auto make_contract() {
   struct Contract {
@@ -320,15 +342,7 @@ template<typename Res>
 
   return Contract{};
 }
-} // namespace AIO
 
-
-// --------------------------------------------------
-// -------------- TEMPLATE DEFINITIONS --------------
-// --------------------------------------------------
-
-
-namespace AIO {
 namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise>::FutureBase(FutureBase &&other) noexcept
@@ -722,6 +736,25 @@ namespace _impl {
 
     auto _ = std::move(*this);
   }
+
+  template<FutureResult Res>
+  void DetachedCanceller<Res>::dispose(DetachedFuture<Res> future) {
+    if (cancelled)
+      std::move(future).cancel();
+    else
+      maybe_future.emplace(std::move(future));
+  }
+
+  template<FutureResult Res>
+  void DetachedCanceller<Res>::cancel() {
+    if (cancelled)
+      return;
+    cancelled = true;
+    auto future = std::move(maybe_future);
+    maybe_future.reset();
+    if (future)
+      std::move(*future).cancel();
+  }
 } // namespace _impl
 
 template<FutureResult Res>
@@ -884,4 +917,35 @@ inline void Promise<void>::fulfill() && {
   std::move(*this).PromiseBase::fulfill(_impl::Void{});
 }
 
+template<FutureResult Res>
+DetachedFuture<Res>::DetachedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
+}
+
+template<FutureResult Res>
+ConsumedFuture<Res>::ConsumedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
+}
+
+template<FutureResult Res1, FutureResult Res2>
+And<Res1, Res2>::And(_impl::VoidSafe<Res1> res1, _impl::VoidSafe<Res2> res2) : value(std::move(res1), std::move(res2)) {
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<typename Res>
+auto And<Res1, Res2>::unwrap_value(Res &&res) {
+  if constexpr (std::is_same_v<std::remove_cvref_t<Res>, _impl::Void>)
+    return std::tuple<>();
+  else
+    return std::tuple<Res>(std::move(res));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<FutureResult Left, FutureResult Right>
+auto And<Res1, Res2>::unwrap_value(And<Left, Right> &&res) {
+  return std::move(res).unwrap();
+}
+
+template<FutureResult Res1, FutureResult Res2>
+auto And<Res1, Res2>::unwrap() && {
+  return std::tuple_cat(unwrap_value(std::get<0>(std::move(value))), unwrap_value(std::get<1>(std::move(value))));
+}
 } // namespace AIO
