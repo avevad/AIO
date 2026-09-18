@@ -413,3 +413,110 @@ TEST(Future, PublicConsumedFutureCancels) {
   EXPECT_TRUE(cancelled);
   std::move(promise).fulfill();
 }
+
+TEST(Future, AndWaitsForBoth) {
+  for (bool right_first : {false, true}) {
+    auto [p1, f1] = make_contract<int>();
+    auto [p2, f2] = make_contract<std::unique_ptr<int>>();
+    auto combined = (std::move(f1) & ok()) & std::move(f2);
+    if (right_first)
+      std::move(p2).fulfill(std::make_unique<int>(2));
+    else
+      std::move(p1).fulfill(1);
+    EXPECT_FALSE(combined.is_fulfilled());
+    if (right_first)
+      std::move(p1).fulfill(1);
+    else
+      std::move(p2).fulfill(std::make_unique<int>(2));
+    bool called = false;
+    auto consumed = std::move(combined).consume_with([&](auto result) {
+      ASSERT_TRUE(result.has_value());
+      auto [one, two] = std::move(*result).flatten();
+      EXPECT_EQ(one, 1);
+      EXPECT_EQ(*two, 2);
+      called = true;
+    });
+    EXPECT_TRUE(called);
+  }
+}
+
+TEST(Future, AndFailureCancelsOther) {
+  auto [promise, future] = make_contract<void>();
+  bool cancelled = false;
+  promise.on_hangup([&] { cancelled = true; });
+  auto error = std::make_exception_ptr(std::runtime_error("and"));
+  auto combined = err<int>(error) & std::move(future);
+  EXPECT_TRUE(cancelled);
+  bool called = false;
+  auto consumed = std::move(combined).consume_with([&](auto result) {
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), error);
+    called = true;
+  });
+  EXPECT_TRUE(called);
+}
+
+TEST(Future, OrSuccessCancelsOther) {
+  auto [promise, future] = make_contract<int>();
+  bool cancelled = false;
+  promise.on_hangup([&] { cancelled = true; });
+  auto combined = std::move(future) | ok();
+  EXPECT_TRUE(cancelled);
+  bool called = false;
+  auto consumed = std::move(combined).consume_with([&](auto result) {
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(std::holds_alternative<VoidReturn<1>>(std::move(*result).flatten()));
+    called = true;
+  });
+  EXPECT_TRUE(called);
+}
+
+TEST(Future, OrFailureWaitsForSuccess) {
+  auto [promise, future] = make_contract<int>();
+  auto combined = err<void>(std::make_exception_ptr(std::runtime_error("first"))) | std::move(future);
+  EXPECT_FALSE(combined.is_fulfilled());
+  bool called = false;
+  auto consumed = std::move(combined).consume_with([&](auto result) {
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(std::get<1>(std::move(*result).flatten()), 42);
+    called = true;
+  });
+  std::move(promise).fulfill(42);
+  EXPECT_TRUE(called);
+}
+
+TEST(Future, OrReportsLastFailure) {
+  for (bool right_first : {false, true}) {
+    auto [p1, f1] = make_contract<void>();
+    auto [p2, f2] = make_contract<void>();
+    auto first = std::make_exception_ptr(std::runtime_error("first"));
+    auto last = std::make_exception_ptr(std::runtime_error("last"));
+    auto combined = std::move(f1) | std::move(f2);
+    std::move(right_first ? p2 : p1).fail_any(first);
+    EXPECT_FALSE(combined.is_fulfilled());
+    std::move(right_first ? p1 : p2).fail_any(last);
+    bool called = false;
+    auto consumed = std::move(combined).consume_with([&](auto result) {
+      ASSERT_FALSE(result.has_value());
+      EXPECT_EQ(result.error(), last);
+      called = true;
+    });
+    EXPECT_TRUE(called);
+  }
+}
+
+TEST(Future, CombinedCancellation) {
+  for (bool either : {false, true}) {
+    auto [p1, f1] = make_contract<int>();
+    auto [p2, f2] = make_contract<void>();
+    bool cancelled1 = false, cancelled2 = false;
+    p1.on_hangup([&] { cancelled1 = true; });
+    p2.on_hangup([&] { cancelled2 = true; });
+    if (either)
+      (std::move(f1) | std::move(f2)).cancel();
+    else
+      (std::move(f1) & std::move(f2)).cancel();
+    EXPECT_TRUE(cancelled1);
+    EXPECT_TRUE(cancelled2);
+  }
+}
