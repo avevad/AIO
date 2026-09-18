@@ -68,6 +68,9 @@ namespace _impl {
 
     void detach() &&;
 
+    template<typename Consumer1>
+    ConsumedFuture<Res> consume_with_impl(Consumer1 &&consumer) &&;
+
   private:
     template<FutureResult Res1>
     friend class AIO::ConsumedFuture;
@@ -76,9 +79,6 @@ namespace _impl {
     friend class FutureBase;
     template<FutureResult Res1, typename Promise1, typename Future1>
     friend class PromiseBase;
-
-    template<typename Consumer1>
-    ConsumedFuture<Res> consume_with(Consumer1 &&consumer) &&;
 
     bool consumed = false;
     std::optional<ExpectedResult> maybe_result = std::nullopt;
@@ -167,6 +167,9 @@ public:
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<Res>>::value_type>
   Mapped<Res1> map_expected(Functor &&functor) &&;
 
+  template<typename Consumer1>
+  ConsumedFuture<Res> consume_with(Consumer1 &&consumer) &&;
+
   using FutureBase::cancel;
 
   using FutureBase::detach;
@@ -198,6 +201,9 @@ public:
 
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<void>>::value_type>
   Mapped<Res1> map_expected(Functor &&functor) &&;
+
+  template<typename Consumer1>
+  ConsumedFuture<void> consume_with(Consumer1 &&consumer) &&;
 
   using FutureBase::cancel;
 
@@ -267,6 +273,11 @@ public:
   explicit ConsumedFuture(Future<Res> &&future) noexcept;
 
   ConsumedFuture(ConsumedFuture &&) noexcept = default;
+
+  template<FutureResult Res1>
+    requires std::is_same_v<_impl::VoidSafe<Res>, _impl::VoidSafe<Res1>>
+  explicit ConsumedFuture(ConsumedFuture<Res1> &&other) noexcept;
+
   ConsumedFuture &operator=(ConsumedFuture &&other) noexcept;
 
   ConsumedFuture(const ConsumedFuture &) = delete;
@@ -278,6 +289,9 @@ public:
   DetachedFuture<Res> release() &&;
 
 private:
+  template<FutureResult Res1>
+  friend class ConsumedFuture;
+
   Future<Res> future;
 };
 
@@ -404,7 +418,7 @@ namespace _impl {
     });
     master.value().dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), master1 = std::move(master1), fun = std::forward<AsyncFunctor>(functor)](
             ExpectedResult result
           ) mutable {
@@ -413,7 +427,7 @@ namespace _impl {
                 MappedFuture future1 = fun(result.move_as_ok());
                 master1.value().dispose(
                   std::move(future1)
-                    .consume_with([promise = std::move(promise)](auto result1) mutable {
+                    .consume_with_impl([promise = std::move(promise)](auto result1) mutable {
                       std::move(promise).set(std::move(result1));
                     })
                     .release()
@@ -443,7 +457,7 @@ namespace _impl {
     });
     master.value().dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), master1 = std::move(master1), handler = std::forward<AsyncHandler>(handler)](
             ExpectedResult result
           ) mutable {
@@ -455,7 +469,7 @@ namespace _impl {
                   Future future1 = handler(e);
                   master1.value().dispose(
                     std::move(future1)
-                      .consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
+                      .consume_with_impl([promise = std::move(promise)](ExpectedResult result1) mutable {
                         std::move(promise).set(std::move(result1));
                       })
                       .release()
@@ -488,7 +502,7 @@ namespace _impl {
     });
     master.value().dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), master1 = std::move(master1), handler = std::forward<AsyncHandler>(handler)](
             ExpectedResult result
           ) mutable {
@@ -500,7 +514,7 @@ namespace _impl {
                   Future future1 = handler(std::current_exception());
                   master1.value().dispose(
                     std::move(future1)
-                      .consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
+                      .consume_with_impl([promise = std::move(promise)](ExpectedResult result1) mutable {
                         std::move(promise).set(std::move(result1));
                       })
                       .release()
@@ -528,7 +542,7 @@ namespace _impl {
     promise.on_hangup([slave = std::move(slave)] mutable { slave.value().cancel(); });
     master.value().dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
             if (result.is_ok()) {
               try {
@@ -555,7 +569,7 @@ namespace _impl {
     promise.on_hangup([slave = std::move(slave)] mutable { slave.value().cancel(); });
     master.value().dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
             try {
               std::move(promise).set(MappedExpected{.expected = functor(std::move(result.expected))});
@@ -573,7 +587,7 @@ namespace _impl {
   template<FutureResult Res, typename Future, typename Promise>
   void FutureBase<Res, Future, Promise>::detach() && {
     std::move(*this)
-      .consume_with([](ExpectedResult result) {
+      .consume_with_impl([](ExpectedResult result) {
         if (!result.is_ok()) {
           try {
             std::rethrow_exception(result.move_as_err());
@@ -609,7 +623,7 @@ namespace _impl {
 
   template<FutureResult Res, typename Future, typename Promise>
   template<typename Consumer1>
-  ConsumedFuture<Res> FutureBase<Res, Future, Promise>::consume_with(Consumer1 &&consumer1) && {
+  ConsumedFuture<Res> FutureBase<Res, Future, Promise>::consume_with_impl(Consumer1 &&consumer1) && {
     Consumer consumer(std::forward<Consumer1>(consumer1));
     AIOXX_ASSUME(consumer);
 
@@ -873,6 +887,25 @@ Future<void>::Mapped<Res1> Future<void>::map_expected(Functor &&functor) && {
 }
 
 template<FutureResult Res>
+template<typename Consumer1>
+ConsumedFuture<Res> Future<Res>::consume_with(Consumer1 &&consumer) && {
+  return std::move(*this).FutureBase::consume_with_impl(
+    [consumer = std::forward<Consumer1>(consumer)](_impl::ExpectedResult<Res> result) mutable {
+      consumer(std::move(result.expected));
+    }
+  );
+}
+
+template<typename Consumer1>
+ConsumedFuture<void> Future<void>::consume_with(Consumer1 &&consumer) && {
+  return ConsumedFuture<void>(std::move(*this).FutureBase::consume_with_impl(
+    [consumer = std::forward<Consumer1>(consumer)](_impl::ExpectedResult<_impl::Void> result) mutable {
+      consumer(std::move(result.expected).transform([](auto) {}));
+    }
+  ));
+}
+
+template<FutureResult Res>
 void DetachedFuture<Res>::cancel() && {
   std::move(future).cancel();
 }
@@ -880,6 +913,12 @@ void DetachedFuture<Res>::cancel() && {
 template<FutureResult Res>
 ConsumedFuture<Res> DetachedFuture<Res>::attach() && {
   return ConsumedFuture<Res>(std::move(future));
+}
+
+template<FutureResult Res>
+template<FutureResult Res1>
+  requires std::is_same_v<_impl::VoidSafe<Res>, _impl::VoidSafe<Res1>>
+ConsumedFuture<Res>::ConsumedFuture(ConsumedFuture<Res1> &&other) noexcept : future(std::move(other.future)) {
 }
 
 template<FutureResult Res>

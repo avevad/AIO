@@ -2,6 +2,7 @@
 
 #include "AIOxx/future.hpp"
 
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -360,4 +361,55 @@ TEST(Future, CancelAfterThenCompletion) {
   EXPECT_TRUE(called);
   EXPECT_TRUE(f.is_fulfilled());
   std::move(f).cancel();
+}
+
+TEST(Future, PublicConsumeWith) {
+  auto [promise, future] = make_contract<std::unique_ptr<int>>();
+  bool called = false;
+  ConsumedFuture<std::unique_ptr<int>> consumed = std::move(future).consume_with(
+    [&, offset = std::make_unique<int>(1)](std::expected<std::unique_ptr<int>, std::exception_ptr> result) {
+      ASSERT_TRUE(result.has_value());
+      EXPECT_EQ(**result + *offset, 3);
+      called = true;
+    }
+  );
+  DetachedFuture<std::unique_ptr<int>> detached = std::move(consumed).release();
+  std::move(promise).fulfill(std::make_unique<int>(2));
+  EXPECT_TRUE(called);
+  std::move(detached).cancel();
+}
+
+TEST(Future, PublicConsumeWithVoid) {
+  bool called = false;
+  ConsumedFuture<void> consumed = ok().consume_with([&](std::expected<void, std::exception_ptr> result) {
+    EXPECT_TRUE(result.has_value());
+    called = true;
+  });
+  EXPECT_TRUE(called);
+  DetachedFuture<void> detached = std::move(consumed).release();
+  std::move(detached).cancel();
+
+  auto [promise, future] = make_contract<void>();
+  auto error = std::make_exception_ptr(std::runtime_error("consume"));
+  called = false;
+  auto failed = std::move(future).consume_with([&](std::expected<void, std::exception_ptr> result) {
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), error);
+    called = true;
+  });
+  std::move(promise).fail_any(error);
+  EXPECT_TRUE(called);
+}
+
+TEST(Future, PublicConsumedFutureCancels) {
+  auto [promise, future] = make_contract<void>();
+  bool cancelled = false;
+  promise.on_hangup([&] { cancelled = true; });
+  {
+    ConsumedFuture<void> consumed = std::move(future).consume_with([](std::expected<void, std::exception_ptr>) {
+      ADD_FAILURE() << "Canceled consumer must not run";
+    });
+  }
+  EXPECT_TRUE(cancelled);
+  std::move(promise).fulfill();
 }
