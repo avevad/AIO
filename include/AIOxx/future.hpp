@@ -3,6 +3,7 @@
 #include <functional>
 #include <tuple>
 #include <type_traits>
+#include <variant>
 
 #include "coroutine.hpp"
 #include "util.hpp"
@@ -334,20 +335,64 @@ public:
   And(const And &) = delete;
   And &operator=(const And &) = delete;
 
-  auto unwrap() &&;
+  auto flatten() &&;
 
 private:
   template<typename Res>
-  static auto unwrap_value(Res &&res);
+  static auto flatten_value(Res &&res);
 
   template<FutureResult Left, FutureResult Right>
-  static auto unwrap_value(And<Left, Right> &&res);
+  static auto flatten_value(And<Left, Right> &&res);
 
   std::tuple<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>> value;
 };
 
 template<FutureResult Res1, FutureResult Res2>
+class Or {
+public:
+  template<size_t Index>
+  Or(
+    std::in_place_index_t<Index>,
+    std::variant_alternative_t<Index, std::variant<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>>> res
+  );
+
+  Or(Or &&) = default;
+  Or &operator=(Or &&) = default;
+
+  Or(const Or &) = delete;
+  Or &operator=(const Or &) = delete;
+
+  auto flatten() &&;
+
+private:
+  template<FutureResult Left, FutureResult Right>
+  friend class Or;
+
+  template<size_t Offset>
+  auto flatten_impl() &&;
+
+  template<size_t Offset, typename Res>
+  static auto flatten_value(Res &&res);
+
+  template<size_t Offset, FutureResult Left, FutureResult Right>
+  static auto flatten_value(Or<Left, Right> &&res);
+
+  template<typename Variant, size_t Offset, size_t Index = 0, typename Source>
+  static Variant move_variant(Source &&source);
+
+  std::variant<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>> var;
+};
+
+template<size_t Index>
+struct VoidReturn {
+  static constexpr size_t INDEX = Index;
+};
+
+template<FutureResult Res1, FutureResult Res2>
 Future<And<Res1, Res2>> operator&(Future<Res1> &&f1, Future<Res2> &&f2);
+
+template<FutureResult Res1, FutureResult Res2>
+Future<Or<Res1, Res2>> operator|(Future<Res1> &&f1, Future<Res2> &&f2);
 } // namespace AIO
 
 
@@ -1004,7 +1049,7 @@ And<Res1, Res2>::And(_impl::VoidSafe<Res1> res1, _impl::VoidSafe<Res2> res2) : v
 
 template<FutureResult Res1, FutureResult Res2>
 template<typename Res>
-auto And<Res1, Res2>::unwrap_value(Res &&res) {
+auto And<Res1, Res2>::flatten_value(Res &&res) {
   if constexpr (std::is_same_v<std::remove_cvref_t<Res>, _impl::Void>)
     return std::tuple<>();
   else
@@ -1013,13 +1058,74 @@ auto And<Res1, Res2>::unwrap_value(Res &&res) {
 
 template<FutureResult Res1, FutureResult Res2>
 template<FutureResult Left, FutureResult Right>
-auto And<Res1, Res2>::unwrap_value(And<Left, Right> &&res) {
-  return std::move(res).unwrap();
+auto And<Res1, Res2>::flatten_value(And<Left, Right> &&res) {
+  return std::move(res).flatten();
 }
 
 template<FutureResult Res1, FutureResult Res2>
-auto And<Res1, Res2>::unwrap() && {
-  return std::tuple_cat(unwrap_value(std::get<0>(std::move(value))), unwrap_value(std::get<1>(std::move(value))));
+auto And<Res1, Res2>::flatten() && {
+  return std::tuple_cat(flatten_value(std::get<0>(std::move(value))), flatten_value(std::get<1>(std::move(value))));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<size_t Index>
+Or<Res1, Res2>::Or(
+  std::in_place_index_t<Index>,
+  std::variant_alternative_t<Index, std::variant<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>>> res
+)
+    : var(std::in_place_index<Index>, std::move(res)) {
+}
+
+namespace _impl {
+  template<typename Left, typename Right>
+  struct ConcatVariants;
+
+  template<typename... Left, typename... Right>
+  struct ConcatVariants<std::variant<Left...>, std::variant<Right...>> {
+    using Type = std::variant<Left..., Right...>;
+  };
+} // namespace _impl
+
+template<FutureResult Res1, FutureResult Res2>
+template<size_t Offset, typename Res>
+auto Or<Res1, Res2>::flatten_value(Res &&res) {
+  if constexpr (std::is_same_v<std::remove_cvref_t<Res>, _impl::Void>)
+    return std::variant<VoidReturn<Offset>>{};
+  else
+    return std::variant<Res>(std::in_place_index<0>, std::move(res));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<size_t Offset, FutureResult Left, FutureResult Right>
+auto Or<Res1, Res2>::flatten_value(Or<Left, Right> &&res) {
+  return std::move(res).template flatten_impl<Offset>();
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<typename Variant, size_t Offset, size_t Index, typename Source>
+Variant Or<Res1, Res2>::move_variant(Source &&source) {
+  if constexpr (Index + 1 < std::variant_size_v<Source>) {
+    if (source.index() != Index)
+      return move_variant<Variant, Offset, Index + 1>(std::move(source));
+  }
+  return Variant(std::in_place_index<Offset + Index>, std::get<Index>(std::move(source)));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<size_t Offset>
+auto Or<Res1, Res2>::flatten_impl() && {
+  using Left = decltype(flatten_value<Offset>(std::get<0>(std::move(var))));
+  constexpr size_t left_size = std::variant_size_v<Left>;
+  using Right = decltype(flatten_value<Offset + left_size>(std::get<1>(std::move(var))));
+  using Result = typename _impl::ConcatVariants<Left, Right>::Type;
+  if (var.index() == 0)
+    return move_variant<Result, 0>(flatten_value<Offset>(std::get<0>(std::move(var))));
+  return move_variant<Result, left_size>(flatten_value<Offset + left_size>(std::get<1>(std::move(var))));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+auto Or<Res1, Res2>::flatten() && {
+  return std::move(*this).template flatten_impl<0>();
 }
 
 template<FutureResult Res1, FutureResult Res2>
@@ -1079,6 +1185,69 @@ Future<And<Res1, Res2>> operator&(Future<Res1> &&f1, Future<Res2> &&f2) {
           state->promise.reset();
         } else {
           state->res2 = std::move(exp);
+        }
+      })
+      .release()
+  );
+  return std::move(future);
+}
+
+template<FutureResult Res1, FutureResult Res2>
+Future<Or<Res1, Res2>> operator|(Future<Res1> &&f1, Future<Res2> &&f2) {
+  auto [promise, future] = make_contract<Or<Res1, Res2>>();
+  struct HangupState {
+    _impl::DetachedCanceller<Res1> canceller1{};
+    _impl::DetachedCanceller<Res2> canceller2{};
+  };
+  auto [here, there] = make_storage(HangupState{});
+  struct CommonState {
+    BoundStorageSlave<HangupState> hangup;
+  };
+  auto [master, slave] = make_storage(CommonState{.hangup = std::move(there)});
+  promise.on_hangup([common = std::move(master)] mutable {
+    common->hangup->canceller1.cancel();
+    common->hangup->canceller2.cancel();
+  });
+  struct OrState {
+    BoundStorageSlave<CommonState> common;
+    std::optional<Promise<Or<Res1, Res2>>> promise;
+    bool failed = false;
+  };
+  auto [state1, state2] = make_storage(OrState{.common = std::move(slave), .promise = std::move(promise)});
+  here->canceller1.dispose(
+    std::move(f1)
+      .consume_with([state = std::move(state1)](std::expected<Res1, std::exception_ptr> exp) mutable {
+        if (!state->promise)
+          return;
+        if (exp) {
+          Or<Res1, Res2> res{std::in_place_index<0>, _impl::unwrap_expected(std::move(exp))};
+          state->common->hangup->canceller2.cancel();
+          std::move(*state->promise).fulfill(std::move(res));
+          state->promise.reset();
+        } else if (state->failed) {
+          std::move(*state->promise).fail_any(exp.error());
+          state->promise.reset();
+        } else {
+          state->failed = true;
+        }
+      })
+      .release()
+  );
+  here->canceller2.dispose(
+    std::move(f2)
+      .consume_with([state = std::move(state2)](std::expected<Res2, std::exception_ptr> exp) mutable {
+        if (!state->promise)
+          return;
+        if (exp) {
+          Or<Res1, Res2> res{std::in_place_index<1>, _impl::unwrap_expected(std::move(exp))};
+          state->common->hangup->canceller1.cancel();
+          std::move(*state->promise).fulfill(std::move(res));
+          state->promise.reset();
+        } else if (state->failed) {
+          std::move(*state->promise).fail_any(exp.error());
+          state->promise.reset();
+        } else {
+          state->failed = true;
         }
       })
       .release()
