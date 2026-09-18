@@ -84,6 +84,34 @@ TEST(Coro, ResumeTwice) {
   EXPECT_TRUE(c.is_dead());
 }
 
+TEST(Coro, Nested) {
+  Coroutine<int()> *outer = nullptr;
+  Coroutine<int()> c([&] {
+    int value = 7;
+    {
+      Coroutine<int()> *inner = nullptr;
+      Coroutine<int()> nested([&] {
+        int result = 11;
+        inner->yield(result);
+        EXPECT_EQ(value, 7);
+        return result + 1;
+      });
+      inner = &nested;
+
+      EXPECT_EQ(nested.resume(), 11);
+      outer->yield(value);
+      EXPECT_EQ(nested.resume(), 12);
+      EXPECT_TRUE(nested.is_dead());
+    }
+    return value;
+  });
+  outer = &c;
+
+  EXPECT_EQ(c.resume(), 7);
+  EXPECT_EQ(c.resume(), 7);
+  EXPECT_TRUE(c.is_dead());
+}
+
 TEST(Coro, ErrorPropagates) {
   Coroutine<int()> c([]() -> int { throw std::runtime_error("x"); });
   EXPECT_THROW((void) c.resume(), std::runtime_error);

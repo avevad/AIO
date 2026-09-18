@@ -142,6 +142,8 @@ Future<std::invoke_result_t<Functor, Args...>> BasicScheduler::fiber(Functor &&f
           std::apply(invoker, std::move(args));
           std::move(promise).fulfill();
         }
+      } catch (const _impl::CoroutineKiller &) {
+        throw;
       } catch (...) {
         std::move(promise).fail_any(std::current_exception());
       }
