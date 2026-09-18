@@ -44,6 +44,7 @@ add_library(aio-static STATIC
         src/context.cpp
         src/io.cpp
         src/fd.cpp
+        src/signal.cpp
         src/scheduler.cpp
         src/stdio.cpp
         src/coroutine.cpp
@@ -57,6 +58,7 @@ add_library(aio-shared SHARED
         src/context.cpp
         src/io.cpp
         src/fd.cpp
+        src/signal.cpp
         src/scheduler.cpp
         src/stdio.cpp
         src/coroutine.cpp
@@ -72,6 +74,7 @@ if (AIOXX_BUILD_TESTS)
             ut/coroutine.cpp
             ut/future.cpp
             ut/aio.cpp
+            ut/signal.cpp
     )
     target_include_directories(aio-ut PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(aio-ut PRIVATE aio-static GTest::gtest_main)
