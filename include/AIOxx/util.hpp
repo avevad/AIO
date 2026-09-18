@@ -3,6 +3,7 @@
 #include <exception>
 #include <expected>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <source_location>
 #include <string>
@@ -90,8 +91,10 @@ public:
 
   void bind_to(BoundStorageSlave<T> &bound);
 
-  T &value();
-  const T &value() const;
+  T &operator*();
+  const T &operator*() const;
+  T *operator->();
+  const T *operator->() const;
 
 private:
   T stored_value;
@@ -112,8 +115,10 @@ public:
 
   void bind_to(BoundStorageMaster<T> &bound);
 
-  T &value();
-  const T &value() const;
+  T &operator*();
+  const T &operator*() const;
+  T *operator->();
+  const T *operator->() const;
 
 private:
   friend class BoundStorageMaster<T>;
@@ -275,13 +280,23 @@ void BoundStorageMaster<T>::bind_to(BoundStorageSlave<T> &bound) {
 }
 
 template<typename T>
-T &BoundStorageMaster<T>::value() {
+T &BoundStorageMaster<T>::operator*() {
   return stored_value;
 }
 
 template<typename T>
-const T &BoundStorageMaster<T>::value() const {
+const T &BoundStorageMaster<T>::operator*() const {
   return stored_value;
+}
+
+template<typename T>
+T *BoundStorageMaster<T>::operator->() {
+  return std::addressof(operator*());
+}
+
+template<typename T>
+const T *BoundStorageMaster<T>::operator->() const {
+  return std::addressof(operator*());
 }
 
 template<typename T>
@@ -290,15 +305,25 @@ void BoundStorageSlave<T>::bind_to(BoundStorageMaster<T> &bound) {
 }
 
 template<typename T>
-T &BoundStorageSlave<T>::value() {
+T &BoundStorageSlave<T>::operator*() {
   if (Bond::is_alive())
-    return Bond::get().value();
+    return *Bond::get();
   return *maybe_value;
 }
 
 template<typename T>
-const T &BoundStorageSlave<T>::value() const {
-  return const_cast<BoundStorageSlave *>(this)->value();
+const T &BoundStorageSlave<T>::operator*() const {
+  return const_cast<BoundStorageSlave *>(this)->operator*();
+}
+
+template<typename T>
+T *BoundStorageSlave<T>::operator->() {
+  return std::addressof(operator*());
+}
+
+template<typename T>
+const T *BoundStorageSlave<T>::operator->() const {
+  return std::addressof(operator*());
 }
 
 namespace _impl {
