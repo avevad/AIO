@@ -136,6 +136,9 @@ namespace _impl {
   struct Void {};
   template<typename Res>
   using VoidSafe = std::conditional_t<std::is_void_v<Res>, Void, Res>;
+
+  template<typename Res>
+  VoidSafe<Res> unwrap_expected(Expected<Res> &&expected);
 } // namespace _impl
 
 template<FutureResult Res>
@@ -342,6 +345,76 @@ private:
 
   std::tuple<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>> value;
 };
+
+template<FutureResult Res1, FutureResult Res2>
+Future<And<Res1, Res2>> operator&(Future<Res1> &&f1, Future<Res2> &&f2) {
+  auto [promise, future] = make_contract<And<Res1, Res2>>();
+  struct HangupState {
+    _impl::DetachedCanceller<Res1> canceller1{};
+    _impl::DetachedCanceller<Res2> canceller2{};
+  };
+  auto [here, there] = make_storage(HangupState{});
+  struct CommonState {
+    BoundStorageSlave<HangupState> hangup;
+  };
+  auto [master, slave] = make_storage(CommonState{.hangup = std::move(there)});
+  promise.on_hangup([common = std::move(master)] mutable {
+    common.value().hangup.value().canceller1.cancel();
+    common.value().hangup.value().canceller2.cancel();
+  });
+  struct AndState {
+    BoundStorageSlave<CommonState> common;
+    std::optional<Promise<And<Res1, Res2>>> promise;
+    std::expected<Res1, std::exception_ptr> res1 = std::unexpected(nullptr);
+    std::expected<Res2, std::exception_ptr> res2 = std::unexpected(nullptr);
+  };
+  auto [state1, state2] = make_storage(AndState{.common = std::move(slave), .promise = std::move(promise)});
+  here.value().canceller1.dispose(
+    std::move(f1)
+      .consume_with([state = std::move(state1)](std::expected<Res1, std::exception_ptr> exp) mutable {
+        if (!state.value().promise)
+          return;
+        if (!exp) {
+          state.value().common.value().hangup.value().canceller2.cancel();
+          std::move(*state.value().promise).fail_any(exp.error());
+          state.value().promise.reset();
+        } else if (state.value().res2) {
+          And<Res1, Res2> res{
+            _impl::unwrap_expected(std::move(exp)),
+            _impl::unwrap_expected(std::move(state.value().res2))
+          };
+          std::move(*state.value().promise).fulfill(std::move(res));
+          state.value().promise.reset();
+        } else {
+          state.value().res1 = std::move(exp);
+        }
+      })
+      .release()
+  );
+  here.value().canceller2.dispose(
+    std::move(f2)
+      .consume_with([state = std::move(state2)](std::expected<Res2, std::exception_ptr> exp) mutable {
+        if (!state.value().promise)
+          return;
+        if (!exp) {
+          state.value().common.value().hangup.value().canceller1.cancel();
+          std::move(*state.value().promise).fail_any(exp.error());
+          state.value().promise.reset();
+        } else if (state.value().res1) {
+          And<Res1, Res2> res{
+            _impl::unwrap_expected(std::move(state.value().res1)),
+            _impl::unwrap_expected(std::move(exp))
+          };
+          std::move(*state.value().promise).fulfill(std::move(res));
+          state.value().promise.reset();
+        } else {
+          state.value().res2 = std::move(exp);
+        }
+      })
+      .release()
+  );
+  return std::move(future);
+}
 } // namespace AIO
 
 
@@ -366,6 +439,16 @@ template<typename Res>
 }
 
 namespace _impl {
+  template<typename Res>
+  VoidSafe<Res> unwrap_expected(Expected<Res> &&expected) {
+    if constexpr (std::is_void_v<Res>) {
+      expected.value();
+      return {};
+    } else {
+      return std::move(expected).value();
+    }
+  }
+
   template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise>::FutureBase(FutureBase &&other) noexcept
       : Bond(std::move(other)), consumed(other.consumed), maybe_result(std::move(other.maybe_result)),
