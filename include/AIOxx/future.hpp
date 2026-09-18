@@ -66,7 +66,7 @@ namespace _impl {
 
     void cancel() &&;
 
-    void detach() &&;
+    DetachedFuture<Res> detach() &&;
 
     template<typename Consumer1>
     ConsumedFuture<Res> consume_with_impl(Consumer1 &&consumer) &&;
@@ -207,7 +207,7 @@ public:
 
   using FutureBase::cancel;
 
-  using FutureBase::detach;
+  DetachedFuture<void> detach() &&;
 };
 
 template<FutureResult Res>
@@ -255,6 +255,11 @@ public:
   explicit DetachedFuture(Future<Res> &&future) noexcept;
 
   DetachedFuture(DetachedFuture &&) noexcept = default;
+
+  template<FutureResult Res1>
+    requires std::is_same_v<_impl::VoidSafe<Res>, _impl::VoidSafe<Res1>>
+  explicit DetachedFuture(DetachedFuture<Res1> &&other) noexcept;
+
   DetachedFuture &operator=(DetachedFuture &&) noexcept = default;
 
   DetachedFuture(const DetachedFuture &) = delete;
@@ -264,6 +269,9 @@ public:
   ConsumedFuture<Res> attach() &&;
 
 private:
+  template<FutureResult Res1>
+  friend class DetachedFuture;
+
   Future<Res> future;
 };
 
@@ -585,8 +593,8 @@ namespace _impl {
   }
 
   template<FutureResult Res, typename Future, typename Promise>
-  void FutureBase<Res, Future, Promise>::detach() && {
-    std::move(*this)
+  DetachedFuture<Res> FutureBase<Res, Future, Promise>::detach() && {
+    return std::move(*this)
       .consume_with_impl([](ExpectedResult result) {
         if (!result.is_ok()) {
           try {
@@ -905,6 +913,10 @@ ConsumedFuture<void> Future<void>::consume_with(Consumer1 &&consumer) && {
   ));
 }
 
+inline DetachedFuture<void> Future<void>::detach() && {
+  return DetachedFuture<void>(std::move(*this).FutureBase::detach());
+}
+
 template<FutureResult Res>
 void DetachedFuture<Res>::cancel() && {
   std::move(future).cancel();
@@ -958,6 +970,12 @@ inline void Promise<void>::fulfill() && {
 
 template<FutureResult Res>
 DetachedFuture<Res>::DetachedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
+}
+
+template<FutureResult Res>
+template<FutureResult Res1>
+  requires std::is_same_v<_impl::VoidSafe<Res>, _impl::VoidSafe<Res1>>
+DetachedFuture<Res>::DetachedFuture(DetachedFuture<Res1> &&other) noexcept : future(std::move(other.future)) {
 }
 
 template<FutureResult Res>
