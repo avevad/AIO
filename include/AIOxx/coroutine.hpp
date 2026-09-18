@@ -304,6 +304,7 @@ void CoroutineBase<Ret, Arg, Derived>::kill() {
 template<typename Ret, typename Arg, typename Derived>
 CoroutineBase<Ret, Arg, Derived>::~CoroutineBase() {
   AIOXX_ASSUME(is_dead());
+  destroy_context(ctx);
 }
 
 template<typename Ret, typename Arg, typename Derived>
