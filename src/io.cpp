@@ -18,9 +18,9 @@ IOQueue::Handle::Handle(Handle &&other) noexcept
   AIOXX_ASSUME(other.queue == nullptr);
 
   if (prom_in)
-    prom_in->handle.value() = this;
+    *prom_in->handle = this;
   if (prom_out)
-    prom_out->handle.value() = this;
+    *prom_out->handle = this;
 
   other.fd = -1;
   other.queue = nullptr;
@@ -41,9 +41,9 @@ IOQueue::Handle &IOQueue::Handle::operator=(Handle &&other) noexcept {
   prom_out = std::move(other.prom_out);
 
   if (prom_in)
-    prom_in->handle.value() = this;
+    *prom_in->handle = this;
   if (prom_out)
-    prom_out->handle.value() = this;
+    *prom_out->handle = this;
 
   other.fd = -1;
   other.queue = nullptr;
@@ -61,7 +61,7 @@ Future<void> IOQueue::Handle::ready() {
   auto [promise, future] = make_contract<void>();
   auto [master, slave] = make_storage(this);
   promise.on_hangup([slave = std::move(slave)] mutable {
-    auto *handle = slave.value();
+    auto *handle = *slave;
     if (!handle)
       return;
     (direction == In ? handle->prom_in : handle->prom_out).reset();
@@ -175,13 +175,13 @@ std::optional<IOQueue::Task> IOQueue::poll(std::optional<std::chrono::time_point
     auto *handle = static_cast<Handle *>(ep_evt.data.ptr);
     std::optional<Promise<void>> in = std::nullopt, out = std::nullopt;
     if (handle->prom_in && (ep_evt.events & (EPOLLIN | EPOLLERR | EPOLLHUP))) {
-      handle->prom_in->handle.value() = nullptr;
+      *handle->prom_in->handle = nullptr;
       in = std::move(handle->prom_in->promise);
       handle->prom_in.reset();
       --pending_consumers;
     }
     if (handle->prom_out && (ep_evt.events & (EPOLLOUT | EPOLLERR | EPOLLHUP))) {
-      handle->prom_out->handle.value() = nullptr;
+      *handle->prom_out->handle = nullptr;
       out = std::move(handle->prom_out->promise);
       handle->prom_out.reset();
       --pending_consumers;

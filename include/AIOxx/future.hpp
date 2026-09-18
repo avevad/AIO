@@ -1,7 +1,9 @@
 #pragma once
 
 #include <functional>
+#include <tuple>
 #include <type_traits>
+#include <variant>
 
 #include "coroutine.hpp"
 #include "util.hpp"
@@ -65,7 +67,10 @@ namespace _impl {
 
     void cancel() &&;
 
-    void detach() &&;
+    DetachedFuture<Res> detach() &&;
+
+    template<typename Consumer1>
+    ConsumedFuture<Res> consume_with_impl(Consumer1 &&consumer) &&;
 
   private:
     template<FutureResult Res1>
@@ -75,9 +80,6 @@ namespace _impl {
     friend class FutureBase;
     template<FutureResult Res1, typename Promise1, typename Future1>
     friend class PromiseBase;
-
-    template<typename Consumer1>
-    ConsumedFuture<Res> consume_with(Consumer1 &&consumer) &&;
 
     bool consumed = false;
     std::optional<ExpectedResult> maybe_result = std::nullopt;
@@ -133,6 +135,11 @@ namespace _impl {
   };
 
   struct Void {};
+  template<typename Res>
+  using VoidSafe = std::conditional_t<std::is_void_v<Res>, Void, Res>;
+
+  template<typename Res>
+  VoidSafe<Res> unwrap_expected(Expected<Res> &&expected);
 } // namespace _impl
 
 template<FutureResult Res>
@@ -163,6 +170,9 @@ public:
 
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<Res>>::value_type>
   Mapped<Res1> map_expected(Functor &&functor) &&;
+
+  template<typename Consumer1>
+  ConsumedFuture<Res> consume_with(Consumer1 &&consumer) &&;
 
   using FutureBase::cancel;
 
@@ -196,9 +206,12 @@ public:
   template<typename Functor, typename Res1 = std::invoke_result_t<Functor, Expected<void>>::value_type>
   Mapped<Res1> map_expected(Functor &&functor) &&;
 
+  template<typename Consumer1>
+  ConsumedFuture<void> consume_with(Consumer1 &&consumer) &&;
+
   using FutureBase::cancel;
 
-  using FutureBase::detach;
+  DetachedFuture<void> detach() &&;
 };
 
 template<FutureResult Res>
@@ -243,10 +256,14 @@ public:
 template<FutureResult Res>
 class DetachedFuture {
 public:
-  explicit DetachedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
-  }
+  explicit DetachedFuture(Future<Res> &&future) noexcept;
 
   DetachedFuture(DetachedFuture &&) noexcept = default;
+
+  template<FutureResult Res1>
+    requires std::is_same_v<_impl::VoidSafe<Res>, _impl::VoidSafe<Res1>>
+  explicit DetachedFuture(DetachedFuture<Res1> &&other) noexcept;
+
   DetachedFuture &operator=(DetachedFuture &&) noexcept = default;
 
   DetachedFuture(const DetachedFuture &) = delete;
@@ -256,16 +273,23 @@ public:
   ConsumedFuture<Res> attach() &&;
 
 private:
+  template<FutureResult Res1>
+  friend class DetachedFuture;
+
   Future<Res> future;
 };
 
 template<FutureResult Res>
 class [[nodiscard]] ConsumedFuture {
 public:
-  explicit ConsumedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
-  }
+  explicit ConsumedFuture(Future<Res> &&future) noexcept;
 
   ConsumedFuture(ConsumedFuture &&) noexcept = default;
+
+  template<FutureResult Res1>
+    requires std::is_same_v<_impl::VoidSafe<Res>, _impl::VoidSafe<Res1>>
+  explicit ConsumedFuture(ConsumedFuture<Res1> &&other) noexcept;
+
   ConsumedFuture &operator=(ConsumedFuture &&other) noexcept;
 
   ConsumedFuture(const ConsumedFuture &) = delete;
@@ -277,6 +301,9 @@ public:
   DetachedFuture<Res> release() &&;
 
 private:
+  template<FutureResult Res1>
+  friend class ConsumedFuture;
+
   Future<Res> future;
 };
 
@@ -284,29 +311,97 @@ namespace _impl {
   template<FutureResult Res>
   class DetachedCanceller {
   public:
-    void dispose(DetachedFuture<Res> future) {
-      if (cancelled)
-        std::move(future).cancel();
-      else
-        maybe_future.emplace(std::move(future));
-    }
+    void dispose(DetachedFuture<Res> future);
 
-    void cancel() {
-      if (cancelled)
-        return;
-      cancelled = true;
-      auto future = std::move(maybe_future);
-      maybe_future.reset();
-      if (future)
-        std::move(*future).cancel();
-    }
+    void cancel();
 
   private:
     bool cancelled = false;
-    std::optional<DetachedFuture<Res>> maybe_future;
+    std::optional<DetachedFuture<Res>> maybe_future = std::nullopt;
   };
 } // namespace _impl
 
+template<typename Res>
+[[nodiscard]] auto make_contract();
+
+template<FutureResult Res1, FutureResult Res2>
+class And {
+public:
+  And(_impl::VoidSafe<Res1> res1, _impl::VoidSafe<Res2> res2);
+
+  And(And &&) = default;
+  And &operator=(And &&) = default;
+
+  And(const And &) = delete;
+  And &operator=(const And &) = delete;
+
+  auto flatten() &&;
+
+private:
+  template<typename Res>
+  static auto flatten_value(Res &&res);
+
+  template<FutureResult Left, FutureResult Right>
+  static auto flatten_value(And<Left, Right> &&res);
+
+  std::tuple<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>> value;
+};
+
+template<FutureResult Res1, FutureResult Res2>
+class Or {
+public:
+  template<size_t Index>
+  Or(
+    std::in_place_index_t<Index>,
+    std::variant_alternative_t<Index, std::variant<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>>> res
+  );
+
+  Or(Or &&) = default;
+  Or &operator=(Or &&) = default;
+
+  Or(const Or &) = delete;
+  Or &operator=(const Or &) = delete;
+
+  auto flatten() &&;
+
+private:
+  template<FutureResult Left, FutureResult Right>
+  friend class Or;
+
+  template<size_t Offset>
+  auto flatten_impl() &&;
+
+  template<size_t Offset, typename Res>
+  static auto flatten_value(Res &&res);
+
+  template<size_t Offset, FutureResult Left, FutureResult Right>
+  static auto flatten_value(Or<Left, Right> &&res);
+
+  template<typename Variant, size_t Offset, size_t Index = 0, typename Source>
+  static Variant move_variant(Source &&source);
+
+  std::variant<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>> var;
+};
+
+template<size_t Index>
+struct VoidReturn {
+  static constexpr size_t INDEX = Index;
+};
+
+template<FutureResult Res1, FutureResult Res2>
+Future<And<Res1, Res2>> operator&(Future<Res1> &&f1, Future<Res2> &&f2);
+
+template<FutureResult Res1, FutureResult Res2>
+Future<Or<Res1, Res2>> operator|(Future<Res1> &&f1, Future<Res2> &&f2);
+} // namespace AIO
+
+
+// --------------------------------------------------
+// -------------- TEMPLATE DEFINITIONS --------------
+// --------------------------------------------------
+
+
+namespace AIO {
 template<typename Res>
 [[nodiscard]] auto make_contract() {
   struct Contract {
@@ -320,16 +415,18 @@ template<typename Res>
 
   return Contract{};
 }
-} // namespace AIO
 
-
-// --------------------------------------------------
-// -------------- TEMPLATE DEFINITIONS --------------
-// --------------------------------------------------
-
-
-namespace AIO {
 namespace _impl {
+  template<typename Res>
+  VoidSafe<Res> unwrap_expected(Expected<Res> &&expected) {
+    if constexpr (std::is_void_v<Res>) {
+      expected.value();
+      return {};
+    } else {
+      return std::move(expected).value();
+    }
+  }
+
   template<FutureResult Res, typename Future, typename Promise>
   FutureBase<Res, Future, Promise>::FutureBase(FutureBase &&other) noexcept
       : Bond(std::move(other)), consumed(other.consumed), maybe_result(std::move(other.maybe_result)),
@@ -385,21 +482,21 @@ namespace _impl {
     auto [master, slave] = make_storage(DetachedCanceller<Res>{});
     auto [master1, slave1] = make_storage(DetachedCanceller<Res1>{});
     promise.on_hangup([slave = std::move(slave), slave1 = std::move(slave1)] mutable {
-      slave.value().cancel();
-      slave1.value().cancel();
+      slave->cancel();
+      slave1->cancel();
     });
-    master.value().dispose(
+    master->dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), master1 = std::move(master1), fun = std::forward<AsyncFunctor>(functor)](
             ExpectedResult result
           ) mutable {
             if (result.is_ok()) {
               try {
                 MappedFuture future1 = fun(result.move_as_ok());
-                master1.value().dispose(
+                master1->dispose(
                   std::move(future1)
-                    .consume_with([promise = std::move(promise)](auto result1) mutable {
+                    .consume_with_impl([promise = std::move(promise)](auto result1) mutable {
                       std::move(promise).set(std::move(result1));
                     })
                     .release()
@@ -424,12 +521,12 @@ namespace _impl {
     auto [master, slave] = make_storage(DetachedCanceller<Res>{});
     auto [master1, slave1] = make_storage(DetachedCanceller<Res>{});
     promise.on_hangup([slave = std::move(slave), slave1 = std::move(slave1)] mutable {
-      slave.value().cancel();
-      slave1.value().cancel();
+      slave->cancel();
+      slave1->cancel();
     });
-    master.value().dispose(
+    master->dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), master1 = std::move(master1), handler = std::forward<AsyncHandler>(handler)](
             ExpectedResult result
           ) mutable {
@@ -439,9 +536,9 @@ namespace _impl {
               } catch (Exception &e) {
                 try {
                   Future future1 = handler(e);
-                  master1.value().dispose(
+                  master1->dispose(
                     std::move(future1)
-                      .consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
+                      .consume_with_impl([promise = std::move(promise)](ExpectedResult result1) mutable {
                         std::move(promise).set(std::move(result1));
                       })
                       .release()
@@ -469,12 +566,12 @@ namespace _impl {
     auto [master, slave] = make_storage(DetachedCanceller<Res>{});
     auto [master1, slave1] = make_storage(DetachedCanceller<Res>{});
     promise.on_hangup([slave = std::move(slave), slave1 = std::move(slave1)] mutable {
-      slave.value().cancel();
-      slave1.value().cancel();
+      slave->cancel();
+      slave1->cancel();
     });
-    master.value().dispose(
+    master->dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), master1 = std::move(master1), handler = std::forward<AsyncHandler>(handler)](
             ExpectedResult result
           ) mutable {
@@ -484,9 +581,9 @@ namespace _impl {
               } catch (...) {
                 try {
                   Future future1 = handler(std::current_exception());
-                  master1.value().dispose(
+                  master1->dispose(
                     std::move(future1)
-                      .consume_with([promise = std::move(promise)](ExpectedResult result1) mutable {
+                      .consume_with_impl([promise = std::move(promise)](ExpectedResult result1) mutable {
                         std::move(promise).set(std::move(result1));
                       })
                       .release()
@@ -511,10 +608,10 @@ namespace _impl {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     auto [promise, future] = make_contract<Res1>();
     auto [master, slave] = make_storage(DetachedCanceller<Res>{});
-    promise.on_hangup([slave = std::move(slave)] mutable { slave.value().cancel(); });
-    master.value().dispose(
+    promise.on_hangup([slave = std::move(slave)] mutable { slave->cancel(); });
+    master->dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
             if (result.is_ok()) {
               try {
@@ -538,10 +635,10 @@ namespace _impl {
     using MappedExpected = ExpectedResult::template Mapped<Res1>;
     auto [promise, future] = make_contract<Res1>();
     auto [master, slave] = make_storage(DetachedCanceller<Res>{});
-    promise.on_hangup([slave = std::move(slave)] mutable { slave.value().cancel(); });
-    master.value().dispose(
+    promise.on_hangup([slave = std::move(slave)] mutable { slave->cancel(); });
+    master->dispose(
       std::move(*this)
-        .consume_with(
+        .consume_with_impl(
           [promise = std::move(promise), functor = std::forward<Functor>(functor)](ExpectedResult result) mutable {
             try {
               std::move(promise).set(MappedExpected{.expected = functor(std::move(result.expected))});
@@ -557,9 +654,9 @@ namespace _impl {
   }
 
   template<FutureResult Res, typename Future, typename Promise>
-  void FutureBase<Res, Future, Promise>::detach() && {
-    std::move(*this)
-      .consume_with([](ExpectedResult result) {
+  DetachedFuture<Res> FutureBase<Res, Future, Promise>::detach() && {
+    return std::move(*this)
+      .consume_with_impl([](ExpectedResult result) {
         if (!result.is_ok()) {
           try {
             std::rethrow_exception(result.move_as_err());
@@ -595,7 +692,7 @@ namespace _impl {
 
   template<FutureResult Res, typename Future, typename Promise>
   template<typename Consumer1>
-  ConsumedFuture<Res> FutureBase<Res, Future, Promise>::consume_with(Consumer1 &&consumer1) && {
+  ConsumedFuture<Res> FutureBase<Res, Future, Promise>::consume_with_impl(Consumer1 &&consumer1) && {
     Consumer consumer(std::forward<Consumer1>(consumer1));
     AIOXX_ASSUME(consumer);
 
@@ -722,6 +819,25 @@ namespace _impl {
 
     auto _ = std::move(*this);
   }
+
+  template<FutureResult Res>
+  void DetachedCanceller<Res>::dispose(DetachedFuture<Res> future) {
+    if (cancelled)
+      std::move(future).cancel();
+    else
+      maybe_future.emplace(std::move(future));
+  }
+
+  template<FutureResult Res>
+  void DetachedCanceller<Res>::cancel() {
+    if (cancelled)
+      return;
+    cancelled = true;
+    auto future = std::move(maybe_future);
+    maybe_future.reset();
+    if (future)
+      std::move(*future).cancel();
+  }
 } // namespace _impl
 
 template<FutureResult Res>
@@ -840,6 +956,29 @@ Future<void>::Mapped<Res1> Future<void>::map_expected(Functor &&functor) && {
 }
 
 template<FutureResult Res>
+template<typename Consumer1>
+ConsumedFuture<Res> Future<Res>::consume_with(Consumer1 &&consumer) && {
+  return std::move(*this).FutureBase::consume_with_impl(
+    [consumer = std::forward<Consumer1>(consumer)](_impl::ExpectedResult<Res> result) mutable {
+      consumer(std::move(result.expected));
+    }
+  );
+}
+
+template<typename Consumer1>
+ConsumedFuture<void> Future<void>::consume_with(Consumer1 &&consumer) && {
+  return ConsumedFuture<void>(std::move(*this).FutureBase::consume_with_impl(
+    [consumer = std::forward<Consumer1>(consumer)](_impl::ExpectedResult<_impl::Void> result) mutable {
+      consumer(std::move(result.expected).transform([](auto) {}));
+    }
+  ));
+}
+
+inline DetachedFuture<void> Future<void>::detach() && {
+  return DetachedFuture<void>(std::move(*this).FutureBase::detach());
+}
+
+template<FutureResult Res>
 void DetachedFuture<Res>::cancel() && {
   std::move(future).cancel();
 }
@@ -847,6 +986,12 @@ void DetachedFuture<Res>::cancel() && {
 template<FutureResult Res>
 ConsumedFuture<Res> DetachedFuture<Res>::attach() && {
   return ConsumedFuture<Res>(std::move(future));
+}
+
+template<FutureResult Res>
+template<FutureResult Res1>
+  requires std::is_same_v<_impl::VoidSafe<Res>, _impl::VoidSafe<Res1>>
+ConsumedFuture<Res>::ConsumedFuture(ConsumedFuture<Res1> &&other) noexcept : future(std::move(other.future)) {
 }
 
 template<FutureResult Res>
@@ -884,4 +1029,229 @@ inline void Promise<void>::fulfill() && {
   std::move(*this).PromiseBase::fulfill(_impl::Void{});
 }
 
+template<FutureResult Res>
+DetachedFuture<Res>::DetachedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
+}
+
+template<FutureResult Res>
+template<FutureResult Res1>
+  requires std::is_same_v<_impl::VoidSafe<Res>, _impl::VoidSafe<Res1>>
+DetachedFuture<Res>::DetachedFuture(DetachedFuture<Res1> &&other) noexcept : future(std::move(other.future)) {
+}
+
+template<FutureResult Res>
+ConsumedFuture<Res>::ConsumedFuture(Future<Res> &&future) noexcept : future(std::move(future)) {
+}
+
+template<FutureResult Res1, FutureResult Res2>
+And<Res1, Res2>::And(_impl::VoidSafe<Res1> res1, _impl::VoidSafe<Res2> res2) : value(std::move(res1), std::move(res2)) {
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<typename Res>
+auto And<Res1, Res2>::flatten_value(Res &&res) {
+  if constexpr (std::is_same_v<std::remove_cvref_t<Res>, _impl::Void>)
+    return std::tuple<>();
+  else
+    return std::tuple<Res>(std::move(res));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<FutureResult Left, FutureResult Right>
+auto And<Res1, Res2>::flatten_value(And<Left, Right> &&res) {
+  return std::move(res).flatten();
+}
+
+template<FutureResult Res1, FutureResult Res2>
+auto And<Res1, Res2>::flatten() && {
+  return std::tuple_cat(flatten_value(std::get<0>(std::move(value))), flatten_value(std::get<1>(std::move(value))));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<size_t Index>
+Or<Res1, Res2>::Or(
+  std::in_place_index_t<Index>,
+  std::variant_alternative_t<Index, std::variant<_impl::VoidSafe<Res1>, _impl::VoidSafe<Res2>>> res
+)
+    : var(std::in_place_index<Index>, std::move(res)) {
+}
+
+namespace _impl {
+  template<typename Left, typename Right>
+  struct ConcatVariants;
+
+  template<typename... Left, typename... Right>
+  struct ConcatVariants<std::variant<Left...>, std::variant<Right...>> {
+    using Type = std::variant<Left..., Right...>;
+  };
+} // namespace _impl
+
+template<FutureResult Res1, FutureResult Res2>
+template<size_t Offset, typename Res>
+auto Or<Res1, Res2>::flatten_value(Res &&res) {
+  if constexpr (std::is_same_v<std::remove_cvref_t<Res>, _impl::Void>)
+    return std::variant<VoidReturn<Offset>>{};
+  else
+    return std::variant<Res>(std::in_place_index<0>, std::move(res));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<size_t Offset, FutureResult Left, FutureResult Right>
+auto Or<Res1, Res2>::flatten_value(Or<Left, Right> &&res) {
+  return std::move(res).template flatten_impl<Offset>();
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<typename Variant, size_t Offset, size_t Index, typename Source>
+Variant Or<Res1, Res2>::move_variant(Source &&source) {
+  if constexpr (Index + 1 < std::variant_size_v<Source>) {
+    if (source.index() != Index)
+      return move_variant<Variant, Offset, Index + 1>(std::move(source));
+  }
+  return Variant(std::in_place_index<Offset + Index>, std::get<Index>(std::move(source)));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+template<size_t Offset>
+auto Or<Res1, Res2>::flatten_impl() && {
+  using Left = decltype(flatten_value<Offset>(std::get<0>(std::move(var))));
+  constexpr size_t left_size = std::variant_size_v<Left>;
+  using Right = decltype(flatten_value<Offset + left_size>(std::get<1>(std::move(var))));
+  using Result = typename _impl::ConcatVariants<Left, Right>::Type;
+  if (var.index() == 0)
+    return move_variant<Result, 0>(flatten_value<Offset>(std::get<0>(std::move(var))));
+  return move_variant<Result, left_size>(flatten_value<Offset + left_size>(std::get<1>(std::move(var))));
+}
+
+template<FutureResult Res1, FutureResult Res2>
+auto Or<Res1, Res2>::flatten() && {
+  return std::move(*this).template flatten_impl<0>();
+}
+
+template<FutureResult Res1, FutureResult Res2>
+Future<And<Res1, Res2>> operator&(Future<Res1> &&f1, Future<Res2> &&f2) {
+  auto [promise, future] = make_contract<And<Res1, Res2>>();
+  struct HangupState {
+    _impl::DetachedCanceller<Res1> canceller1{};
+    _impl::DetachedCanceller<Res2> canceller2{};
+  };
+  auto [here, there] = make_storage(HangupState{});
+  struct CommonState {
+    BoundStorageSlave<HangupState> hangup;
+  };
+  auto [master, slave] = make_storage(CommonState{.hangup = std::move(there)});
+  promise.on_hangup([common = std::move(master)] mutable {
+    common->hangup->canceller1.cancel();
+    common->hangup->canceller2.cancel();
+  });
+  struct AndState {
+    BoundStorageSlave<CommonState> common;
+    std::optional<Promise<And<Res1, Res2>>> promise;
+    std::expected<Res1, std::exception_ptr> res1 = std::unexpected(nullptr);
+    std::expected<Res2, std::exception_ptr> res2 = std::unexpected(nullptr);
+  };
+  auto [state1, state2] = make_storage(AndState{.common = std::move(slave), .promise = std::move(promise)});
+  here->canceller1.dispose(
+    std::move(f1)
+      .consume_with([state = std::move(state1)](std::expected<Res1, std::exception_ptr> exp) mutable {
+        if (!state->promise)
+          return;
+        if (!exp) {
+          state->common->hangup->canceller2.cancel();
+          std::move(*state->promise).fail_any(exp.error());
+          state->promise.reset();
+        } else if (state->res2) {
+          And<Res1, Res2> res{_impl::unwrap_expected(std::move(exp)), _impl::unwrap_expected(std::move(state->res2))};
+          std::move(*state->promise).fulfill(std::move(res));
+          state->promise.reset();
+        } else {
+          state->res1 = std::move(exp);
+        }
+      })
+      .release()
+  );
+  here->canceller2.dispose(
+    std::move(f2)
+      .consume_with([state = std::move(state2)](std::expected<Res2, std::exception_ptr> exp) mutable {
+        if (!state->promise)
+          return;
+        if (!exp) {
+          state->common->hangup->canceller1.cancel();
+          std::move(*state->promise).fail_any(exp.error());
+          state->promise.reset();
+        } else if (state->res1) {
+          And<Res1, Res2> res{_impl::unwrap_expected(std::move(state->res1)), _impl::unwrap_expected(std::move(exp))};
+          std::move(*state->promise).fulfill(std::move(res));
+          state->promise.reset();
+        } else {
+          state->res2 = std::move(exp);
+        }
+      })
+      .release()
+  );
+  return std::move(future);
+}
+
+template<FutureResult Res1, FutureResult Res2>
+Future<Or<Res1, Res2>> operator|(Future<Res1> &&f1, Future<Res2> &&f2) {
+  auto [promise, future] = make_contract<Or<Res1, Res2>>();
+  struct HangupState {
+    _impl::DetachedCanceller<Res1> canceller1{};
+    _impl::DetachedCanceller<Res2> canceller2{};
+  };
+  auto [here, there] = make_storage(HangupState{});
+  struct CommonState {
+    BoundStorageSlave<HangupState> hangup;
+  };
+  auto [master, slave] = make_storage(CommonState{.hangup = std::move(there)});
+  promise.on_hangup([common = std::move(master)] mutable {
+    common->hangup->canceller1.cancel();
+    common->hangup->canceller2.cancel();
+  });
+  struct OrState {
+    BoundStorageSlave<CommonState> common;
+    std::optional<Promise<Or<Res1, Res2>>> promise;
+    bool failed = false;
+  };
+  auto [state1, state2] = make_storage(OrState{.common = std::move(slave), .promise = std::move(promise)});
+  here->canceller1.dispose(
+    std::move(f1)
+      .consume_with([state = std::move(state1)](std::expected<Res1, std::exception_ptr> exp) mutable {
+        if (!state->promise)
+          return;
+        if (exp) {
+          Or<Res1, Res2> res{std::in_place_index<0>, _impl::unwrap_expected(std::move(exp))};
+          state->common->hangup->canceller2.cancel();
+          std::move(*state->promise).fulfill(std::move(res));
+          state->promise.reset();
+        } else if (state->failed) {
+          std::move(*state->promise).fail_any(exp.error());
+          state->promise.reset();
+        } else {
+          state->failed = true;
+        }
+      })
+      .release()
+  );
+  here->canceller2.dispose(
+    std::move(f2)
+      .consume_with([state = std::move(state2)](std::expected<Res2, std::exception_ptr> exp) mutable {
+        if (!state->promise)
+          return;
+        if (exp) {
+          Or<Res1, Res2> res{std::in_place_index<1>, _impl::unwrap_expected(std::move(exp))};
+          state->common->hangup->canceller1.cancel();
+          std::move(*state->promise).fulfill(std::move(res));
+          state->promise.reset();
+        } else if (state->failed) {
+          std::move(*state->promise).fail_any(exp.error());
+          state->promise.reset();
+        } else {
+          state->failed = true;
+        }
+      })
+      .release()
+  );
+  return std::move(future);
+}
 } // namespace AIO

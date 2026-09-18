@@ -3,6 +3,7 @@
 #include <exception>
 #include <expected>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <source_location>
 #include <string>
@@ -90,8 +91,10 @@ public:
 
   void bind_to(BoundStorageSlave<T> &bound);
 
-  T &value();
-  const T &value() const;
+  T &operator*();
+  const T &operator*() const;
+  T *operator->();
+  const T *operator->() const;
 
 private:
   T stored_value;
@@ -112,8 +115,10 @@ public:
 
   void bind_to(BoundStorageMaster<T> &bound);
 
-  T &value();
-  const T &value() const;
+  T &operator*();
+  const T &operator*() const;
+  T *operator->();
+  const T *operator->() const;
 
 private:
   friend class BoundStorageMaster<T>;
@@ -138,31 +143,33 @@ template<typename T>
 template<typename Res>
 using Expected = std::expected<Res, std::exception_ptr>;
 
-template<typename Res>
-struct ExpectedResult {
-  using Result = Res;
-  using Expected = Expected<Res>;
-  template<typename Res1>
-  using Mapped = ExpectedResult<Res1>;
+namespace _impl {
+  template<typename Res>
+  struct ExpectedResult {
+    using Result = Res;
+    using Expected = Expected<Res>;
+    template<typename Res1>
+    using Mapped = ExpectedResult<Res1>;
 
-  bool is_ok() const;
+    bool is_ok() const;
 
-  decltype(auto) move_as_ok();
-  auto move_as_err();
+    decltype(auto) move_as_ok();
+    auto move_as_err();
 
-  template<typename R = Res>
-  static ExpectedResult make_ok(R res)
-    requires(!std::is_void_v<Res>);
-  static ExpectedResult make_ok()
-    requires(std::is_void_v<Res>);
+    template<typename R = Res>
+    static ExpectedResult make_ok(R res)
+      requires(!std::is_void_v<Res>);
+    static ExpectedResult make_ok()
+      requires(std::is_void_v<Res>);
 
-  template<typename Exception>
-  static ExpectedResult make_err_from(const Exception &e);
-  static ExpectedResult make_err(std::exception_ptr err);
-  static ExpectedResult make_err_from_current();
+    template<typename Exception>
+    static ExpectedResult make_err_from(const Exception &e);
+    static ExpectedResult make_err(std::exception_ptr err);
+    static ExpectedResult make_err_from_current();
 
-  Expected expected;
-};
+    Expected expected;
+  };
+} // namespace _impl
 
 } // namespace AIO
 
@@ -273,13 +280,23 @@ void BoundStorageMaster<T>::bind_to(BoundStorageSlave<T> &bound) {
 }
 
 template<typename T>
-T &BoundStorageMaster<T>::value() {
+T &BoundStorageMaster<T>::operator*() {
   return stored_value;
 }
 
 template<typename T>
-const T &BoundStorageMaster<T>::value() const {
+const T &BoundStorageMaster<T>::operator*() const {
   return stored_value;
+}
+
+template<typename T>
+T *BoundStorageMaster<T>::operator->() {
+  return std::addressof(operator*());
+}
+
+template<typename T>
+const T *BoundStorageMaster<T>::operator->() const {
+  return std::addressof(operator*());
 }
 
 template<typename T>
@@ -288,70 +305,82 @@ void BoundStorageSlave<T>::bind_to(BoundStorageMaster<T> &bound) {
 }
 
 template<typename T>
-T &BoundStorageSlave<T>::value() {
+T &BoundStorageSlave<T>::operator*() {
   if (Bond::is_alive())
-    return Bond::get().value();
+    return *Bond::get();
   return *maybe_value;
 }
 
 template<typename T>
-const T &BoundStorageSlave<T>::value() const {
-  return const_cast<BoundStorageSlave *>(this)->value();
+const T &BoundStorageSlave<T>::operator*() const {
+  return const_cast<BoundStorageSlave *>(this)->operator*();
 }
 
-template<typename Res>
-bool ExpectedResult<Res>::is_ok() const {
-  return expected.has_value();
+template<typename T>
+T *BoundStorageSlave<T>::operator->() {
+  return std::addressof(operator*());
 }
 
-template<typename Res>
-decltype(auto) ExpectedResult<Res>::move_as_ok() {
-  AIOXX_ASSUME(is_ok());
-  if constexpr (std::is_void_v<Res>) {
-  } else {
-    return std::move(*expected);
+template<typename T>
+const T *BoundStorageSlave<T>::operator->() const {
+  return std::addressof(operator*());
+}
+
+namespace _impl {
+  template<typename Res>
+  bool ExpectedResult<Res>::is_ok() const {
+    return expected.has_value();
   }
-}
 
-template<typename Res>
-auto ExpectedResult<Res>::move_as_err() {
-  AIOXX_ASSUME(!is_ok());
-  return std::move(expected.error());
-}
-
-template<typename Res>
-template<typename R>
-ExpectedResult<Res> ExpectedResult<Res>::make_ok(R res)
-  requires(!std::is_void_v<Res>)
-{
-  return {.expected = std::move(res)};
-}
-
-template<typename Res>
-ExpectedResult<Res> ExpectedResult<Res>::make_ok()
-  requires(std::is_void_v<Res>)
-{
-  return {.expected = {}};
-}
-
-template<typename Res>
-ExpectedResult<Res> ExpectedResult<Res>::make_err(std::exception_ptr err) {
-  AIOXX_ASSUME(err != nullptr);
-  return {.expected = std::unexpected(std::move(err))};
-}
-
-template<typename Res>
-ExpectedResult<Res> ExpectedResult<Res>::make_err_from_current() {
-  return make_err(std::current_exception());
-}
-
-template<typename Res>
-template<typename Exception>
-ExpectedResult<Res> ExpectedResult<Res>::make_err_from(const Exception &e) {
-  try {
-    throw e;
-  } catch (...) {
-    return make_err_from_current();
+  template<typename Res>
+  decltype(auto) ExpectedResult<Res>::move_as_ok() {
+    AIOXX_ASSUME(is_ok());
+    if constexpr (std::is_void_v<Res>) {
+    } else {
+      return std::move(*expected);
+    }
   }
-}
+
+  template<typename Res>
+  auto ExpectedResult<Res>::move_as_err() {
+    AIOXX_ASSUME(!is_ok());
+    return std::move(expected.error());
+  }
+
+  template<typename Res>
+  template<typename R>
+  ExpectedResult<Res> ExpectedResult<Res>::make_ok(R res)
+    requires(!std::is_void_v<Res>)
+  {
+    return {.expected = std::move(res)};
+  }
+
+  template<typename Res>
+  ExpectedResult<Res> ExpectedResult<Res>::make_ok()
+    requires(std::is_void_v<Res>)
+  {
+    return {.expected = {}};
+  }
+
+  template<typename Res>
+  ExpectedResult<Res> ExpectedResult<Res>::make_err(std::exception_ptr err) {
+    AIOXX_ASSUME(err != nullptr);
+    return {.expected = std::unexpected(std::move(err))};
+  }
+
+  template<typename Res>
+  ExpectedResult<Res> ExpectedResult<Res>::make_err_from_current() {
+    return make_err(std::current_exception());
+  }
+
+  template<typename Res>
+  template<typename Exception>
+  ExpectedResult<Res> ExpectedResult<Res>::make_err_from(const Exception &e) {
+    try {
+      throw e;
+    } catch (...) {
+      return make_err_from_current();
+    }
+  }
+} // namespace _impl
 } // namespace AIO
